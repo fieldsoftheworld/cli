@@ -23,6 +23,23 @@ ftw data query --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out iowa.parquet
 ftw view --bbox 1.55,48.20,1.70,48.30 --out beauce.png   # map of the fields, colored by score
 ```
 
+## Run models on new imagery
+
+```sh
+uv tool install 'ftw-cli[inference] @ git+https://github.com/fieldsoftheworld/cli'
+
+# Everything at once: scenes from the crop calendar, download, inference, polygons
+ftw infer all --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out-dir iowa
+
+# Or step by step
+ftw imagery search --bbox -93.7,41.95,-93.6,42.05 --year 2024
+ftw imagery download --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out iowa.tif
+ftw infer run iowa.tif --out classes.tif --model prue-ccby-b5
+ftw infer polygonize classes.tif --out fields.parquet
+```
+
+`ftw imagery` picks the least cloudy Sentinel-2 scene near the start and end of the growing season from the crop calendar, as ftw-baselines does. `ftw infer` runs the models in ONNX through onnxruntime, so there's no PyTorch dependency, and uses a GPU when onnxruntime has one. `ftw models list` shows the models; they download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The polygons are GeoParquet in EPSG:4326 with the same columns as the FTW 2nd Edition.
+
 ## TUI
 
 ```sh

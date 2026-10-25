@@ -25,11 +25,23 @@ dependencies = [
   "rich>=14",
 ]
 optional-dependencies.dev = [ "pre-commit>=4", "pytest>=9", "pytest-cov>=7", "ruff>=0.17" ]
+optional-dependencies.imagery = [
+  "planetary-computer>=1",
+  "pystac-client>=0.9",
+  "rasterio>=1.4",
+]
+optional-dependencies.inference = [
+  "ftw-cli[imagery]",
+  "onnxruntime>=1.20",
+]
 optional-dependencies.tui = [
   "textual>=8.2",
   "textual-image>=0.14",
 ]
 scripts.ftw = "ftw_cli.cli:run"
+
+[tool.uv]
+sources.ftw-cli = { workspace = true }
 
 [tool.ruff]
 fix = true

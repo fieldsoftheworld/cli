@@ -1,12 +1,13 @@
 """The ``ftw`` command line."""
 
-import sys
 from pathlib import Path
 from typing import Annotated
 
 from cyclopts import App, Parameter
 
 from ftw_cli import __version__, ftw2e, output
+from ftw_cli.cli_args import BBoxArg, YearArg, fail, need, parse_bbox
+from ftw_cli.cli_infer import imagery, infer, models
 
 app = App(
     name="ftw",
@@ -17,17 +18,9 @@ data = App(
     name="data", help="Query the FTW Global Data 2nd Edition field boundaries in place."
 )
 app.command(data)
-
-BBoxArg = Annotated[
-    str,
-    Parameter(
-        allow_leading_hyphen=True,
-        help="xmin,ymin,xmax,ymax in EPSG:4326 degrees, e.g. -93.7,41.95,-93.6,42.05.",
-    ),
-]
-YearArg = Annotated[
-    int | None, Parameter(help="Dataset year (2017-2025). Defaults to the latest.")
-]
+app.command(imagery)
+app.command(models)
+app.command(infer)
 
 
 @app.meta.default
@@ -56,7 +49,7 @@ def files(*, bbox: BBoxArg, year: YearArg = None):
     """List the partition files a query over BBOX would read, without reading them."""
     con = ftw2e.connect()
     year = year or ftw2e.latest_year(con)
-    output.emit(ftw2e.files(con, _bbox(bbox), year), title=f"Files for {year}")
+    output.emit(ftw2e.files(con, parse_bbox(bbox), year), title=f"Files for {year}")
 
 
 @data.command
@@ -77,14 +70,14 @@ def query(
     """Summarize the fields in BBOX, or write them to a file with --out."""
     con = ftw2e.connect()
     year = year or ftw2e.latest_year(con)
-    box = _bbox(bbox)
+    box = parse_bbox(bbox)
     if out is None:
         output.emit(ftw2e.summarize(con, box, year), title=f"FTW {year} fields")
         return
     try:
         output.emit(ftw2e.export(con, box, year, out, limit))
     except (LookupError, ValueError) as e:
-        _fail(str(e))
+        fail(str(e))
 
 
 @app.command
@@ -103,7 +96,7 @@ def view(
 
     con = ftw2e.connect()
     year = year or ftw2e.latest_year(con)
-    box = _bbox(bbox)
+    box = parse_bbox(bbox)
     fields = ftw2e.fields(con, box, year, limit)
     render.render(fields, box, width).save(out)
     output.emit({"path": str(out), "fields": len(fields), "year": year})
@@ -114,21 +107,9 @@ def tui():
     """Browse field boundaries interactively. Needs the [tui] extra."""
     try:
         from ftw_cli.tui import main
-    except ImportError:
-        _fail("the TUI needs extra packages: pip install 'ftw-cli[tui]'")
+    except ImportError as e:
+        need("tui", e)
     main()
-
-
-def _bbox(text: str) -> ftw2e.BBox:
-    try:
-        return ftw2e.BBox.parse(text)
-    except ValueError as e:
-        _fail(str(e))
-
-
-def _fail(message: str, code: int = 2):
-    output.stderr.print(f"[red]error:[/red] {message}")
-    sys.exit(code)
 
 
 def run():

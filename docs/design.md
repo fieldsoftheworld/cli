@@ -27,14 +27,16 @@ Working now:
 - `ftw data query --bbox [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
 - `ftw view --bbox --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
+- `ftw imagery search|download --bbox --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
+- `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize).
 
 Planned:
 
 - `ftw catalog list|query`: the harmonized field data on Source Coop, 69 national collections with crop types.
 - `ftw join catalog --fields f.parquet --collection nl`: match fields to harmonized parcels by IoU and carry their attributes over.
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
-- `ftw imagery search|download --bbox --year`: pick the planting and harvest Sentinel-2 scenes from the crop calendar and download them for an AOI.
-- `ftw models list|show` and `ftw infer run|polygonize`: run released models and polygonize the output.
+- Polygonization that splits touching fields. `infer polygonize` takes connected regions of the field class, like ftw-baselines, so fields merge wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
+- ftw-q (quarterly mosaics) and FTP (PlanetScope), which need their own imagery commands.
 - `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
 - TUI: imagery and inference screens as those commands land.
 - `ftw schema [command]`: a command's parameters as JSON Schema, for agents.
@@ -42,6 +44,10 @@ Planned:
 ## Models
 
 The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. The v1 and v2 models and DelineateAnything stay in ftw-baselines. The CLI reads single-file ONNX models from Hugging Face under `fieldsoftheworld`, with URLs pinned to a commit: FTP B3/B7, ftw-q, and the PRUE CC-BY B3/B5/B7 (`ftw-prue-ccby`, commit `ffe4452`). The v3 PRUE models without the CC-BY restriction are still checkpoints on GitHub releases and need the same export. Those exports match torch's predicted class on every pixel of the test image (logits within 3e-4), and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
+
+### Parity with ftw-baselines
+
+`ftw infer run` matches `ftw-tools inference run` with the same checkpoint: on an Iowa scene, 11 of 936k pixels differ, from ONNX and PyTorch floating point ties. That needed two details from the torch pipeline. Patches follow torchgeo's `GriddedPatchSampler` grid, centered on the image (a grid anchored at the corner changes 5.6% of pixels, since the models depend on patch context), and the 2x upsampling is bilinear with aligned corners, matching kornia's `Resize`. Scene selection picks the same scenes, and `infer polygonize` produces the same fields (area IoU 0.9999).
 
 ## Data
 
@@ -66,7 +72,7 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 ## Milestones
 
 1. `data` query and export, `view`, the TUI, CI. (Done.)
-2. `imagery`, `models`, and ONNX `infer`, with TUI screens for them.
+2. `imagery`, `models`, and ONNX `infer`. (Done.) TUI screens for them, and better field splitting.
 3. `catalog`, `join catalog`, and `join sql`.
 4. `view --web`, `schema`, and `SKILL.md`.
 
