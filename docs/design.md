@@ -39,7 +39,7 @@ Planned:
 
 ## Models
 
-Every semantic segmentation model in the ftw-baselines registry (FTW v1 to v3, and FTP) is a segmentation-models-pytorch U-Net with an EfficientNet encoder, so one ONNX export covers all of them. Exported with dynamic height and width, B3 and B7 match torch's predicted class on every pixel of the test image (max logit difference 3e-4). ONNX files are 49 MB for B3 and 251 MB for B7, and onnxruntime runs a 256x512 tile in under 0.1 s on CPU. FTP already publishes `.onnx` on Hugging Face. The FTW models need the same export published next to their checkpoints.
+The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. FTP B3/B7 and ftw-q already publish `.onnx` on Hugging Face under `fieldsoftheworld`. The PRUE models ship as checkpoints on GitHub releases, so they need ONNX exports. They're segmentation-models-pytorch U-Nets with EfficientNet encoders, and exported with dynamic height and width, B3 and B7 match torch's predicted class on every pixel of the test image (max logit difference 3e-4). The files are 49 MB for B3 and 251 MB for B7, and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
 
 ## Data
 
@@ -71,5 +71,5 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 
 ## Open questions
 
-- Where do the FTW ONNX files live: GitHub releases next to the checkpoints, or Hugging Face like FTP?
+- Should the PRUE ONNX exports go on Hugging Face next to FTP and ftw-q, or on the GitHub releases next to the checkpoints?
 - DuckDB 2.0 is days old and changed its Python API, so we pin `<3` and test against it.
