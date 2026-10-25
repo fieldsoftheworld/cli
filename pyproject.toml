@@ -1,0 +1,36 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
+[project]
+name = "ftw-cli"
+version = "0.1.0"
+description = "Fields of The World field boundaries for practitioners and agents"
+readme = "README.md"
+license = "MIT"
+authors = [ { name = "Isaac Corley", email = "isaac.corley@taylorgeospatial.org" } ]
+requires-python = ">=3.12"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  "cyclopts>=5.3,<6",
+  "duckdb>=2,<3",
+  "pyarrow>=21",
+  "rich>=14",
+]
+optional-dependencies.dev = [ "pre-commit>=4", "pytest>=9", "pytest-cov>=7", "ruff>=0.17" ]
+scripts.ftw = "ftw_cli.cli:run"
+
+[tool.ruff]
+fix = true
+lint.extend-select = [ "B", "I", "UP" ]
+
+[tool.pytest]
+ini_options.addopts = '-m "not integration"'
+ini_options.markers = [ "integration: needs network access to Source Coop" ]
+ini_options.testpaths = [ "tests" ]

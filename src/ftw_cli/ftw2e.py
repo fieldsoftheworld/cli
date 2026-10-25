@@ -1,0 +1,142 @@
+"""FTW Global Data 2nd Edition on Source Coop, queried in place with DuckDB."""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import duckdb
+
+BASE_URL = "https://data.source.coop/ftw/global-data-2e"
+VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
+
+# GDAL drivers DuckDB spatial uses for non-Parquet exports, keyed by file suffix.
+EXPORT_DRIVERS = {".geojson": "GeoJSON", ".gpkg": "GPKG", ".fgb": "FlatGeobuf"}
+
+
+@dataclass(frozen=True)
+class BBox:
+    xmin: float
+    ymin: float
+    xmax: float
+    ymax: float
+
+    @classmethod
+    def parse(cls, text: str) -> "BBox":
+        """Parse ``xmin,ymin,xmax,ymax`` in EPSG:4326 degrees."""
+        parts = text.split(",")
+        if len(parts) != 4:
+            raise ValueError(f"bbox needs 4 comma-separated numbers, got {text!r}")
+        bbox = cls(*(float(p) for p in parts))
+        if not (-180 <= bbox.xmin < bbox.xmax <= 180):
+            raise ValueError(
+                f"bbox longitudes must satisfy -180 <= xmin < xmax <= 180: {text!r}"
+            )
+        if not (-90 <= bbox.ymin < bbox.ymax <= 90):
+            raise ValueError(
+                f"bbox latitudes must satisfy -90 <= ymin < ymax <= 90: {text!r}"
+            )
+        return bbox
+
+    def overlaps(self, prefix: str = "") -> str:
+        """SQL predicate for rows whose ``{prefix}xmin..ymax`` bounds intersect this box."""
+        p = prefix
+        return (
+            f"{p}xmax >= {self.xmin} and {p}xmin <= {self.xmax} "
+            f"and {p}ymax >= {self.ymin} and {p}ymin <= {self.ymax}"
+        )
+
+    def envelope(self) -> str:
+        return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
+
+
+def connect() -> duckdb.DuckDBPyConnection:
+    con = duckdb.connect()
+    con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
+    con.execute("SET geometry_always_xy = true")
+    return con
+
+
+def info(con: duckdb.DuckDBPyConnection) -> list[dict]:
+    """Per-year totals from the vector index."""
+    rows = con.execute(
+        f"""
+        select year, count(*) as files, sum(n_parcels) as parcels,
+               round(sum(area_km2)) as area_km2, round(sum(size_bytes) / 1e9, 1) as size_gb
+        from '{VECTOR_INDEX}' group by year order by year
+        """
+    )
+    return _records(rows)
+
+
+def latest_year(con: duckdb.DuckDBPyConnection) -> int:
+    return con.execute(f"select max(year) from '{VECTOR_INDEX}'").fetchone()[0]
+
+
+def files(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[dict]:
+    """Index rows for the partition files a query over ``bbox`` and ``year`` would read."""
+    rows = con.execute(
+        f"""
+        select year, zone, href, n_parcels, round(size_bytes / 1e9, 2) as size_gb
+        from '{VECTOR_INDEX}' where year = ? and {bbox.overlaps()} order by zone
+        """,
+        [year],
+    )
+    return _records(rows)
+
+
+def summarize(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> dict:
+    hrefs = [f["href"] for f in files(con, bbox, year)]
+    summary = {"year": year, "bbox": list(vars(bbox).values()), "files": len(hrefs)}
+    if not hrefs:
+        return summary | {"fields": 0, "area_ha": 0, "mean_score": None}
+    count, area, score = con.execute(
+        f"""
+        select count(*), round(sum("metrics:area") / 1e4, 1), round(avg(score), 1)
+        from read_parquet(?) where {_in_bbox(bbox)}
+        """,
+        [hrefs],
+    ).fetchone()
+    return summary | {"fields": count, "area_ha": area or 0, "mean_score": score}
+
+
+def export(
+    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, out: Path, limit: int | None
+) -> dict:
+    """Write the fields intersecting ``bbox`` to ``out``; the format follows its suffix."""
+    hrefs = [f["href"] for f in files(con, bbox, year)]
+    if not hrefs:
+        raise LookupError(f"no FTW {year} fields intersect {bbox}")
+    suffix = out.suffix.lower()
+    if suffix == ".parquet":
+        fmt = "FORMAT parquet"
+    elif suffix in EXPORT_DRIVERS:
+        fmt = f"FORMAT gdal, DRIVER '{EXPORT_DRIVERS[suffix]}'"
+    else:
+        supported = ", ".join([".parquet", *EXPORT_DRIVERS])
+        raise ValueError(
+            f"unsupported output format {suffix!r}; use one of {supported}"
+        )
+    limit_sql = f"limit {int(limit)}" if limit else ""
+    con.execute(
+        f"""
+        copy (
+            select * exclude (bbox, zone) from read_parquet(?)
+            where {_in_bbox(bbox)} {limit_sql}
+        ) to '{_quote(out)}' ({fmt})
+        """,
+        [hrefs],
+    )
+    return {"path": str(out), "files_read": len(hrefs)}
+
+
+def _in_bbox(bbox: BBox) -> str:
+    # The bbox struct lets Parquet skip row groups; ST_Intersects drops bbox-only hits.
+    return f"{bbox.overlaps('bbox.')} and ST_Intersects(geometry, {bbox.envelope()})"
+
+
+def _quote(path: Path) -> str:
+    return str(path).replace("'", "''")
+
+
+def _records(rel: duckdb.DuckDBPyConnection) -> list[dict]:
+    columns = [d[0] for d in rel.description]
+    return [dict(zip(columns, row, strict=True)) for row in rel.fetchall()]
