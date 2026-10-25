@@ -39,7 +39,7 @@ Planned:
 
 ## Models
 
-The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. FTP B3/B7 and ftw-q already publish `.onnx` on Hugging Face under `fieldsoftheworld`. The PRUE models ship as checkpoints on GitHub releases, so they need ONNX exports. They're segmentation-models-pytorch U-Nets with EfficientNet encoders, and exported with dynamic height and width, B3 and B7 match torch's predicted class on every pixel of the test image (max logit difference 3e-4). The files are 49 MB for B3 and 251 MB for B7, and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
+The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. The v1 and v2 models and DelineateAnything stay in ftw-baselines. FTP B3/B7 and ftw-q already publish `.onnx` on Hugging Face under `fieldsoftheworld`. The PRUE models ship as checkpoints on GitHub releases, so they need ONNX exports. They're segmentation-models-pytorch U-Nets with EfficientNet encoders, and exported with dynamic height and width, B3 and B7 match torch's predicted class on every pixel of the test image (max logit difference 3e-4). The files are 49 MB for B3 and 251 MB for B7, and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
 
 ## Data
 
