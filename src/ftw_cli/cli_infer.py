@@ -4,7 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Literal
 
-from cyclopts import App, Parameter
+from cyclopts import App, Parameter, validators
 
 from ftw_cli import models as registry
 from ftw_cli import output
@@ -99,7 +99,11 @@ def show(name: ModelName):
 @infer.command
 def run(
     input: Annotated[
-        Path, Parameter(help="Stacked GeoTIFF, as written by `ftw imagery download`.")
+        Path,
+        Parameter(
+            validator=validators.Path(exists=True, dir_okay=False),
+            help="Stacked GeoTIFF, as written by `ftw imagery download`.",
+        ),
     ],
     *,
     out: Annotated[
@@ -118,7 +122,13 @@ def run(
 
 @infer.command
 def polygonize(
-    input: Annotated[Path, Parameter(help="Classes GeoTIFF from `ftw infer run`.")],
+    input: Annotated[
+        Path,
+        Parameter(
+            validator=validators.Path(exists=True, dir_okay=False),
+            help="Classes GeoTIFF from `ftw infer run`.",
+        ),
+    ],
     *,
     out: Annotated[Path, Parameter(help="GeoParquet to write, in EPSG:4326.")],
     simplify: Annotated[
@@ -182,7 +192,7 @@ def _search(
             }
             for window, when in (("a", start), ("b", end))
         ]
-    except (LookupError, ValueError) as e:
+    except (LookupError, ValueError, OSError) as e:
         fail(str(e))
 
 
@@ -208,7 +218,7 @@ def _run(
         need("inference", e)
     try:
         return onnx.run(input, out, model, patch_size, batch_size)
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         fail(str(e))
 
 
@@ -221,5 +231,5 @@ def _polygonize(
         need("inference", e)
     try:
         return onnx.polygonize(input, out, simplify, min_size, max_size)
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         fail(str(e))
