@@ -66,7 +66,7 @@ No Python library renders vector tiles in a terminal, so previews are rendered i
 
 ## Relationship to ftw-baselines
 
-ftw-baselines keeps training, evaluation, and the model registry it publishes. ftw-cli reads that registry's checkpoints. ftw-cli owns the `ftw` command, and ftw-baselines' command is `ftw-tools`, matching its PyPI package (ftw-baselines#303), so both can be installed together.
+ftw-baselines keeps training, evaluation, and the model registry it publishes. ftw-cli reads that registry's checkpoints. ftw-cli will own the `ftw` command. When we make the switch, ftw-baselines' command becomes `ftw-tools`, matching its PyPI package, so both can be installed together. Until then, installing both in one environment means whichever installs last wins `ftw`.
 
 ## Milestones
 
