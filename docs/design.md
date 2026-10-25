@@ -66,7 +66,7 @@ No Python library renders vector tiles in a terminal, so previews are rendered i
 
 ## Relationship to ftw-baselines
 
-ftw-baselines keeps training, evaluation, and the model registry it publishes. ftw-cli reads that registry's checkpoints. Both packages currently want the `ftw` command, which is the first open question.
+ftw-baselines keeps training, evaluation, and the model registry it publishes. ftw-cli reads that registry's checkpoints. ftw-cli owns the `ftw` command, and ftw-baselines' command is `ftw-tools`, matching its PyPI package (ftw-baselines#303), so both can be installed together.
 
 ## Milestones
 
@@ -78,5 +78,4 @@ ftw-baselines keeps training, evaluation, and the model registry it publishes. f
 
 ## Open questions
 
-- **Who owns `ftw`?** I'd give the command to ftw-cli and rename the baselines entry point to `ftw-baselines`, so practitioners type `ftw` and researchers keep their tooling under a clearly separate name.
 - **DuckDB 2.0.** It's four days old and changed its Python API (`fetchone` is gone from relations), so we pin `<3` and test against it.
