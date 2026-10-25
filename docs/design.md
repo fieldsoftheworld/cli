@@ -35,7 +35,7 @@ Planned:
 
 - `ftw data` also gets `--country`/`--geom file` filters and `--where` for column predicates (score, area).
 - `ftw catalog list|query`: the harmonized field data on Source Coop (69 national collections in fiboa, crop types included).
-- `ftw join cdl --fields f.parquet --year 2024`: majority USDA CDL class and purity per field.
+- `ftw join cdl --fields f.parquet --year 2024`: majority USDA CDL class and purity per field. It clips CDL to the fields' extent through the CropScape API and caches the clip, since we don't mirror CDL.
 - `ftw join catalog --fields f.parquet --collection nl`: match FTW fields to harmonized parcels by IoU to carry crop labels across.
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views, for anything the verbs don't cover.
 - `ftw imagery search|download`: Sentinel-2 scene selection with the crop calendar, ported from ftw-baselines.
@@ -79,5 +79,4 @@ ftw-baselines keeps training, evaluation, and the model registry it publishes. f
 ## Open questions
 
 - **Who owns `ftw`?** I'd give the command to ftw-cli and rename the baselines entry point to `ftw-baselines`, so practitioners type `ftw` and researchers keep their tooling under a clearly separate name.
-- **Is CDL worth mirroring?** Converting the national CDL zips to COGs on Source Coop would make CDL joins one range-read away instead of a per-AOI API call to CropScape.
 - **DuckDB 2.0.** It's four days old and changed its Python API (`fetchone` is gone from relations), so we pin `<3` and test against it.
