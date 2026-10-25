@@ -19,6 +19,19 @@ ftw data query --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out iowa.parquet
 
 `--out` accepts `.parquet`, `.geojson`, `.gpkg`, and `.fgb`. Output is a table in a terminal and JSON when piped; `--json` forces JSON.
 
+```sh
+ftw view --bbox 1.55,48.20,1.70,48.30 --out beauce.png   # map of the fields, colored by score
+```
+
+## TUI
+
+```sh
+uv tool install 'ftw-cli[tui] @ git+https://github.com/fieldsoftheworld/cli'
+ftw tui
+```
+
+Pick an area and year, and the TUI shows the fields on a map colored by model score, with a summary and a table of the largest fields. `r` queries, `e` exports the area to GeoParquet, `q` quits. The map is a full-resolution image in terminals that support the kitty or sixel graphics protocols (kitty, WezTerm, iTerm2, recent Windows Terminal) and colored blocks elsewhere, including plain SSH.
+
 ## Develop
 
 ```sh

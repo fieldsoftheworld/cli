@@ -1,5 +1,6 @@
 """FTW Global Data 2nd Edition on Source Coop, queried in place with DuckDB."""
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +53,10 @@ def connect() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
     con.execute("SET geometry_always_xy = true")
+    con.execute("SET enable_progress_bar = false")
+    # DuckDB 2.0.0 crashes ("Vector::Reference used on vector of different type")
+    # on ORDER BY ... LIMIT over a filter on the bbox struct with this optimizer on.
+    con.execute("SET disabled_optimizers = 'late_materialization'")
     return con
 
 
@@ -96,6 +101,28 @@ def summarize(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> dict:
         [hrefs],
     ).fetchone()
     return summary | {"fields": count, "area_ha": area or 0, "mean_score": score}
+
+
+def fields(
+    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, limit: int
+) -> list[dict]:
+    """Up to ``limit`` fields in ``bbox`` with GeoJSON geometry, largest first."""
+    hrefs = [f["href"] for f in files(con, bbox, year)]
+    if not hrefs:
+        return []
+    rows = con.execute(
+        f"""
+        select id, round("metrics:area" / 1e4, 2) as area_ha, score,
+               ST_AsGeoJSON(geometry) as geometry
+        from read_parquet(?) where {_in_bbox(bbox)}
+        order by "metrics:area" desc limit {int(limit)}
+        """,
+        [hrefs],
+    )
+    records = _records(rows)
+    for r in records:
+        r["geometry"] = json.loads(r["geometry"])
+    return records
 
 
 def export(

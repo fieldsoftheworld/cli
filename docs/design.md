@@ -13,10 +13,10 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 
 | Install | Adds | For |
 |---|---|---|
-| `ftw-cli` | cyclopts, rich, duckdb, pyarrow | querying and exporting field boundaries |
+| `ftw-cli` | cyclopts, rich, duckdb, pyarrow, pillow | querying, exporting, and drawing field boundaries |
 | `ftw-cli[imagery]` | rasterio, pystac-client | crop-calendar scene selection and Sentinel-2 download |
 | `ftw-cli[inference]` | the above plus onnxruntime | running FTW models |
-| `ftw-cli[tui]` | textual, textual-image | the interactive TUI and map previews |
+| `ftw-cli[tui]` | textual, textual-image | the interactive TUI |
 
 ## Commands
 
@@ -25,6 +25,8 @@ Working now:
 - `ftw data info`: per-year totals for the 2nd Edition.
 - `ftw data files --bbox`: the files a query would read, and their sizes.
 - `ftw data query --bbox [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
+- `ftw view --bbox --out map.png`: the fields drawn to a PNG, colored by score.
+- `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
 
 Planned:
 
@@ -33,13 +35,13 @@ Planned:
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
 - `ftw imagery search|download --bbox --year`: pick the planting and harvest Sentinel-2 scenes from the crop calendar and download them for an AOI.
 - `ftw models list|show` and `ftw infer run|polygonize`: run released models and polygonize the output.
-- `ftw view [--web]`: a map preview in the terminal, or a local MapLibre page.
-- `ftw tui`: the interactive interface.
+- `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
+- TUI: imagery and inference screens as those commands land.
 - `ftw schema [command]`: a command's parameters as JSON Schema, for agents.
 
 ## Models
 
-The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. The v1 and v2 models and DelineateAnything stay in ftw-baselines. FTP B3/B7 and ftw-q already publish `.onnx` on Hugging Face under `fieldsoftheworld`. The PRUE models ship as checkpoints on GitHub releases, so they need ONNX exports. They're segmentation-models-pytorch U-Nets with EfficientNet encoders, and exported with dynamic height and width, B3 and B7 match torch's predicted class on every pixel of the test image (max logit difference 3e-4). The files are 49 MB for B3 and 251 MB for B7, and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
+The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. The v1 and v2 models and DelineateAnything stay in ftw-baselines. The CLI reads single-file ONNX models from Hugging Face under `fieldsoftheworld`, with URLs pinned to a commit: FTP B3/B7, ftw-q, and the PRUE CC-BY B3/B5/B7 (`ftw-prue-ccby`, commit `ffe4452`). The v3 PRUE models without the CC-BY restriction are still checkpoints on GitHub releases and need the same export. Those exports match torch's predicted class on every pixel of the test image (logits within 3e-4), and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
 
 ## Data
 
@@ -51,7 +53,7 @@ The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variant
 
 ## Viewing
 
-No Python library draws vector tiles in a terminal, so previews are images: fields drawn over a basemap, shown through the kitty or sixel graphics protocol with textual-image, falling back to half-block characters over plain SSH. `ftw view --web` serves the 2nd Edition PMTiles and local files to a MapLibre page, which over SSH is one port forward.
+No Python library draws vector tiles in a terminal, so the map is an image. `render.py` draws the fields with Pillow, colored along the FTW green ramp by score and corrected for latitude, and the TUI shows it with textual-image: full resolution over the kitty or sixel graphics protocols, colored half-blocks elsewhere. The TUI draws at most the 20,000 largest fields so a large box stays responsive. `ftw view --web` will serve the 2nd Edition PMTiles and local files to a MapLibre page, which over SSH is one port forward.
 
 ## Agents
 
@@ -63,13 +65,11 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 
 ## Milestones
 
-1. `data` and `catalog` query and export, CI.
-2. `join catalog` and `join sql`.
-3. `imagery`, `models`, and ONNX `infer`.
-4. `view` and the TUI.
-5. `schema` and `SKILL.md`.
+1. `data` query and export, `view`, the TUI, CI. (Done.)
+2. `imagery`, `models`, and ONNX `infer`, with TUI screens for them.
+3. `catalog`, `join catalog`, and `join sql`.
+4. `view --web`, `schema`, and `SKILL.md`.
 
 ## Open questions
 
-- Should the PRUE ONNX exports go on Hugging Face next to FTP and ftw-q, or on the GitHub releases next to the checkpoints?
-- DuckDB 2.0 is days old and changed its Python API, so we pin `<3` and test against it.
+- DuckDB 2.0 is days old. It changed its Python API, and its late-materialization optimizer crashes on our top-N query over the bbox filter, so `connect()` disables that optimizer. We pin `<3` and test against it.

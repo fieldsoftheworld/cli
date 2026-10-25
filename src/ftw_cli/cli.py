@@ -87,6 +87,38 @@ def query(
         _fail(str(e))
 
 
+@app.command
+def view(
+    *,
+    bbox: BBoxArg,
+    out: Annotated[Path, Parameter(help="PNG file to write.")],
+    year: YearArg = None,
+    width: Annotated[int, Parameter(help="Image width in pixels.")] = 1200,
+    limit: Annotated[
+        int, Parameter(help="Draw at most this many fields, largest first.")
+    ] = 50_000,
+):
+    """Draw the fields in BBOX to a PNG, colored by model score."""
+    from ftw_cli import render
+
+    con = ftw2e.connect()
+    year = year or ftw2e.latest_year(con)
+    box = _bbox(bbox)
+    fields = ftw2e.fields(con, box, year, limit)
+    render.render(fields, box, width).save(out)
+    output.emit({"path": str(out), "fields": len(fields), "year": year})
+
+
+@app.command
+def tui():
+    """Browse field boundaries interactively. Needs the [tui] extra."""
+    try:
+        from ftw_cli.tui import main
+    except ImportError:
+        _fail("the TUI needs extra packages: pip install 'ftw-cli[tui]'")
+    main()
+
+
 def _bbox(text: str) -> ftw2e.BBox:
     try:
         return ftw2e.BBox.parse(text)

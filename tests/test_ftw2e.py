@@ -32,3 +32,6 @@ def test_query_reads_one_zone_file():
     summary = ftw2e.summarize(con, IOWA, 2025)
     assert summary["files"] == 1
     assert summary["fields"] > 0
+    fields = ftw2e.fields(con, IOWA, 2025, limit=5)
+    assert len(fields) == 5
+    assert fields[0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
