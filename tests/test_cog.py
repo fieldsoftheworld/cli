@@ -25,4 +25,10 @@ def test_write_makes_a_cog_with_overviews_tags_and_descriptions(tmp_path):
         assert ds.tags()["FTW_MODEL"] == "m"
         assert ds.descriptions == ("a", "b")
         assert (ds.read() == data).all()
+    # Portolan (PTL-DAT-009/010) needs statistics inside the file, not in a .aux.xml.
+    with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(out) as ds:
+        for band in (1, 2):
+            stats = ds.tags(band)
+            assert float(stats["STATISTICS_MAXIMUM"]) == data[band - 1].max()
+            assert "STATISTICS_STDDEV" in stats and "STATISTICS_VALID_PERCENT" in stats
     assert list(tmp_path.iterdir()) == [out]  # the temporary GeoTIFF is gone

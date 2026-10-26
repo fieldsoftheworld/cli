@@ -47,3 +47,7 @@ jobs:
       - run: uv run python tests/samples.py samples
       - run: uvx --from 'fiboa-cli>=0.21,<0.22' fiboa validate samples/fields.parquet
       - run: uvx --from rio-cogeo rio cogeo validate --strict samples/scores.tif
+      # rashid checks whole catalogs, so its metadata findings about the bare sample
+      # catalog are expected; rashid_gate.py fails on its data rules (PTL-DAT) only.
+      - run: uvx --from 'rashid>=0.3,<0.4' rashid check samples --json --data-scope local > rashid.json || true
+      - run: uv run python tests/rashid_gate.py rashid.json
