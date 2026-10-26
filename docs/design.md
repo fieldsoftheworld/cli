@@ -28,6 +28,7 @@ Working now:
 - `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
+- `ftw doctor`: versions, extras, GPU, cache, and whether each remote service answers, run in parallel.
 - `ftw detect AREA --year --out`: imagery, model, and BoundaryVote in one step, writing fields to .parquet (fiboa), .gpkg, .geojson, or .fgb, with `--keep DIR` to keep the rasters and `--crs` (an EPSG code, or `utm`) for the output CRS. Non-4326 GeoParquet carries PROJJSON, which `fiboa.py` gets from DuckDB's bundled PROJ by writing a one-row file, so the base install needs no pyproj. `ftw predict` and `ftw polygonize` run the two halves, and `ftw models list` shows the models. Splitting with `fbp.FTW_2E` keeps touching fields apart; connected regions of the field class, as in ftw-baselines, merge them wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:

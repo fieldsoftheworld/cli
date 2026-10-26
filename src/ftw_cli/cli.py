@@ -139,6 +139,18 @@ def view(
     output.emit({"path": str(out), "fields": len(fields), "year": year})
 
 
+@app.command
+def doctor():
+    """What is installed and reachable. Attach the output to bug reports."""
+    from ftw_cli import doctor as checks
+
+    with spinner("Checking the install and the network"):
+        rows = checks.run()
+    output.emit(rows, title="ftw doctor")
+    if any(r["status"] == "failed" for r in rows):
+        raise SystemExit(1)
+
+
 def _report(kind, error, traceback):
     if issubclass(kind, EXPECTED):
         output.stderr.print(f"[red]error:[/red] {error}")
