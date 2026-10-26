@@ -1,4 +1,4 @@
-"""``ftw compare`` and ``ftw data diff``: match one set of fields against another."""
+"""``ftw compare`` and ``ftw data diff`` match field sets; ``ftw stats`` adds raster statistics."""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Annotated
 from cyclopts import Parameter, validators
 
 from ftw_cli import ftw2e, match, output, vectors
-from ftw_cli.cli_args import AreaArg, parse_area
+from ftw_cli.cli_args import AreaArg, parse_area, require
 from ftw_cli.progress import spinner
 
 FieldsFile = Annotated[
@@ -77,3 +77,34 @@ def diff(
     output.emit(rows, title=f"FTW fields, {start} to {end}")
     if out:
         output.stderr.print(f"[dim]wrote {written:,} fields to {out}[/dim]")
+
+
+def stats(
+    fields: Annotated[
+        FieldsFile,
+        Parameter(help="Fields to annotate: .parquet, .gpkg, .geojson, or .fgb."),
+    ],
+    *,
+    raster: Annotated[
+        list[Path],
+        Parameter(
+            validator=validators.Path(exists=True, dir_okay=False),
+            negative="",
+            help="A raster to summarize, such as a COG; repeat for more.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        Parameter(help="Fields with statistics: .parquet, .gpkg, .geojson, or .fgb."),
+    ],
+    bands: Annotated[
+        str | None, Parameter(help="Bands to summarize, such as 1,2. Defaults to all.")
+    ] = None,
+):
+    """Add each field's mean, stdev, min, max, and pixel count from rasters."""
+    require("stats")
+    from ftw_cli import zonal
+
+    chosen = [int(b) for b in bands.split(",")] if bands else None
+    with spinner("Summarizing rasters per field"):
+        output.emit(zonal.add(fields, raster, out, chosen))

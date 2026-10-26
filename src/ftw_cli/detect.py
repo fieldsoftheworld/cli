@@ -8,6 +8,7 @@ from pathlib import Path
 
 import duckdb
 import numpy as np
+import pyarrow as pa
 import rasterio
 from fbp import FTW_2E, run_windowed
 from rasterio.features import shapes
@@ -19,6 +20,24 @@ from ftw_cli.ftw2e import BBox
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
 BANDS = ("field", "boundary")
+# Declared the way the 2nd Edition declares its own score column.
+SCORE_SCHEMA = {
+    "$schema": fiboa.SDL,
+    "properties": {
+        "score": {
+            "type": "uint8",
+            "description": "Mean model field probability inside the field, x 100 rounded (0-100)",
+        },
+        "field_prob": {
+            "type": "float",
+            "description": "Mean model field probability (0-1)",
+        },
+        "boundary_prob": {
+            "type": "float",
+            "description": "Mean model boundary probability (0-1)",
+        },
+    },
+}
 
 
 def predict(
@@ -174,6 +193,7 @@ def split_into(
     """Split uint8 field and boundary ``scores`` with ``fbp.FTW_2E`` into table ``fields``.
 
     ``keep`` is an SQL predicate over ``geom`` in the ``native`` CRS; ids are ``prefix-n``.
+    A field whose pixels form several pieces keeps the largest, so each is one Polygon.
     """
     field, boundary = scores.astype(np.float32) / 255
     prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
@@ -185,27 +205,50 @@ def split_into(
         pixel_area_m2=abs(transform.a * transform.e),
     )
     del prob
-    geoms = [
-        json.dumps(g)
-        for g, _ in shapes(instances, mask=instances > 0, transform=transform)
-    ]
+    pieces = list(shapes(instances, mask=instances > 0, transform=transform))
     con.execute(
-        "create or replace temp table shapes as select unnest(?::varchar[]) as g",
-        [geoms],
+        "create or replace temp table shapes as "
+        "select unnest(?::varchar[]) as g, unnest(?::bigint[]) as label",
+        [[json.dumps(g) for g, _ in pieces], [int(v) for _, v in pieces]],
     )
+    del pieces
+    con.register("probs", _mean_probs(instances, scores))
     con.execute(
         'create table if not exists fields (id varchar, geometry geometry, "metrics:area" float, '
-        '"metrics:perimeter" float)'
+        '"metrics:perimeter" float, score utinyint, field_prob float, boundary_prob float)'
     )
     con.execute(
         f"""
         insert into fields
         select concat('{_sql(prefix)}-', row_number() over ()),
                ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}'),
-               area::float, ST_Perimeter(geom)::float
-        from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
+               area::float, ST_Perimeter(geom)::float,
+               least(100, greatest(0, round(field_prob * 100)))::utinyint,
+               field_prob::float, boundary_prob::float
+        from (
+            select geom, ST_Area(geom) as area, label
+            from (select ST_GeomFromGeoJSON(g) as geom, label from shapes)
+            qualify row_number() over (partition by label order by area desc) = 1
+        ) join probs using (label)
         where {Filters(min_area, max_area).sql(area="area")} and {keep}
         """
+    )
+
+
+def _mean_probs(
+    instances: np.ndarray, scores: np.ndarray, rows: int = 1024
+) -> pa.Table:
+    """Each field's mean field and boundary probability over its pixels, a block at a time."""
+    n = int(instances.max()) + 1
+    sums = np.zeros((3, n))
+    for r in range(0, instances.shape[0], rows):
+        labels = instances[r : r + rows].ravel()
+        sums[0] += np.bincount(labels, minlength=n)
+        for i, band in enumerate(scores[:, r : r + rows], 1):
+            sums[i] += np.bincount(labels, band.ravel(), n)
+    field, boundary = sums[1:] / np.maximum(sums[0], 1) / 255
+    return pa.table(
+        {"label": np.arange(n), "field_prob": field, "boundary_prob": boundary}
     )
 
 
@@ -216,7 +259,11 @@ def collection(model: str, imagery: str) -> dict:
     )
     return fiboa.collection(
         "ftw-cli",
-        **{"determination:method": "auto-imagery", "determination:details": details},
+        **{
+            "determination:method": "auto-imagery",
+            "determination:details": details,
+            "schemas:custom": SCORE_SCHEMA,
+        },
     )
 
 

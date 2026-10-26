@@ -29,6 +29,7 @@ YearsArg = Annotated[
 ]
 EXTRAS = {
     "imagery": ("rasterio", "pystac_client", "planetary_computer"),
+    "stats": ("rasterio", "exactextract"),
     "inference": (
         "rasterio",
         "pystac_client",

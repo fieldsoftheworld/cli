@@ -59,6 +59,28 @@ def test_polygonize_measures_meters_and_writes_wgs84(tmp_path):
         in collection["schemas"]["ftw-cli"]
     )
     assert collection["determination:method"] == "auto-imagery"
+    # The 2nd Edition's score: mean field probability (230/255) x 100, rounded.
+    row = table.to_pylist()[0]
+    assert row["score"] == 90
+    assert row["field_prob"] == pytest.approx(230 / 255)
+    assert row["boundary_prob"] == 0
+    assert "score" in collection["schemas:custom"]["properties"]
+    assert geo["geometry_types"] == ["Polygon"]
+
+
+def test_a_field_in_pieces_keeps_its_largest_polygon(tmp_path, monkeypatch):
+    instances = np.zeros((40, 40), dtype=np.int32)
+    instances[0:20, 0:20] = 1  # 40,000 m²
+    instances[30:35, 30:35] = 1  # the same field's 2,500 m² stray piece
+    monkeypatch.setattr(detect, "run_windowed", lambda *args, **kwargs: instances)
+    field = np.where(instances > 0, 255, 0).astype(np.uint8)
+    path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
+
+    out = tmp_path / "fields.parquet"
+    assert detect.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
+    row = pq.read_table(out).to_pylist()[0]
+    assert row["metrics:area"] == pytest.approx(40_000)
+    assert row["score"] == 100
 
 
 def test_polygonize_filters_fields_by_area(tmp_path):
