@@ -87,7 +87,7 @@ def search(
         pystac_client.Client.open(url)
         .search(
             collections=[collection],
-            bbox=list(vars(bbox).values()),
+            bbox=list(bbox.bounds),
             datetime=f"{start}T00:00:00Z/{end}T23:59:59Z",
             query={"eo:cloud_cover": {"lt": cloud_cover_max}},
         )
@@ -139,7 +139,7 @@ def download(
         if "proj:epsg" in items[0].properties
         else items[0].properties["proj:code"]
     )
-    left, bottom, right, top = transform_bounds("EPSG:4326", crs, *vars(bbox).values())
+    left, bottom, right, top = transform_bounds("EPSG:4326", crs, *bbox.bounds)
     left, bottom = (
         math.floor(left / RESOLUTION) * RESOLUTION,
         math.floor(bottom / RESOLUTION) * RESOLUTION,
@@ -201,7 +201,7 @@ def download(
 
 def _day_of_year(url: str, bbox: BBox) -> int:
     with rasterio.open(url) as src:
-        window = from_bounds(*vars(bbox).values(), transform=src.transform)
+        window = from_bounds(*bbox.bounds, transform=src.transform)
         values = src.read(
             1,
             window=window.round_offsets().round_lengths(),

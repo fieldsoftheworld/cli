@@ -161,3 +161,26 @@ def test_polygonize_writes_the_requested_crs(tmp_path, crs, code):
         [str(tmp_path / "f.gpkg")],
     ).fetchall()
     assert srs == str(code)
+
+
+def test_polygonize_keeps_only_fields_in_the_area_polygon(tmp_path):
+    import duckdb
+
+    from ftw_cli.ftw2e import BBox
+
+    field = np.zeros((40, 80), dtype=np.uint8)
+    field[10:30, 10:30] = 230  # x 400,100-400,300 m
+    field[10:30, 50:70] = 230  # x 400,500-400,700 m
+    path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true")
+    [(wkt,)] = con.execute(
+        "select ST_AsText(ST_Transform(ST_MakeEnvelope(400000, 4649600, 400400, "
+        "4650000), 'EPSG:32615', 'EPSG:4326'))"
+    ).fetchall()
+    area = BBox(-180, -90, 180, 90, shape=wkt)
+
+    kept = detect.polygonize(path, tmp_path / "f.parquet", 0, 0, area=area)
+    every = detect.polygonize(path, tmp_path / "all.parquet", 0, 0)
+
+    assert (kept["fields"], every["fields"]) == (1, 2)
