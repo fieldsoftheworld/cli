@@ -8,7 +8,7 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 - ftw-cli writes standard files and leaves interactive viewing to tools built for it, such as QGIS and lonboard. Rasters are Cloud Optimized GeoTIFFs (DEFLATE with a predictor, 512 px tiles, averaged overviews). Vector Parquet is fiboa 0.3 GeoParquet: GeoParquet 1.1 with a bbox covering column, Vecorel collection metadata, fiboa's column nullability, and rows sorted along a Hilbert curve. `fiboa.py` streams DuckDB's Arrow batches through pyarrow, because DuckDB's own Parquet writer infers nullability that fiboa fixes. A CI job checks sample outputs with `fiboa validate` and `rio cogeo validate --strict`.
 - Data is read where it lives. DuckDB reads the 2nd Edition's small file index, then only the row groups that overlap the request. A 10 km box in Iowa reads one 2.3 GB file in about 3 seconds.
 - Output is a table in a terminal and JSON when piped or with `--json`. Errors go to stderr with a non-zero exit, and nothing prompts without a terminal.
-- Commands are noun-verb like GDAL's (`ftw data query`, `ftw infer run`), take an area as a place name or `xmin,ymin,xmax,ymax` (also as `--bbox` or `--place`), and pick the output format from the file suffix. Place names go through Nominatim with a User-Agent and a local cache, as its usage policy asks.
+- Commands are noun-verb like GDAL's (`ftw data query`, `ftw imagery download`), take an area as a place name or `xmin,ymin,xmax,ymax` (also as `--bbox` or `--place`), and pick the output format from the file suffix. Place names go through Nominatim with a User-Agent and a local cache, as its usage policy asks.
 - Progress bars go to stderr, only in a terminal. Library functions take an optional `progress(done, total)` callback and draw nothing themselves.
 
 ## Install
@@ -28,7 +28,7 @@ Working now:
 - `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
-- `ftw models list`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
+- `ftw detect AREA --year --out`: imagery, model, and BoundaryVote in one step, writing fields to .parquet (fiboa), .gpkg, .geojson, or .fgb, with `--keep DIR` to keep the rasters and `--crs` (an EPSG code, or `utm`) for the output CRS. Non-4326 GeoParquet carries PROJJSON, which `fiboa.py` gets from DuckDB's bundled PROJ by writing a one-row file, so the base install needs no pyproj. `ftw predict` and `ftw polygonize` run the two halves, and `ftw models list` shows the models. Splitting with `fbp.FTW_2E` keeps touching fields apart; connected regions of the field class, as in ftw-baselines, merge them wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:
 
@@ -45,7 +45,7 @@ The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variant
 
 ### Parity with ftw-baselines
 
-The ONNX models in `ftw infer run` match `ftw-tools inference run` with the same checkpoint: on an Iowa scene, the predicted class differs on 11 of 936k pixels, from ONNX and PyTorch floating point ties. That needed two details from the torch pipeline. Patches follow torchgeo's `GriddedPatchSampler` grid, centered on the image (a grid anchored at the corner changes 5.6% of pixels, since the models depend on patch context), and the 2x upsampling is bilinear with aligned corners, matching kornia's `Resize`. Scene selection picks the same scenes. `infer polygonize` differs from ftw-baselines by design, since it splits fields with BoundaryVote instead of taking connected regions.
+The ONNX models in `ftw predict` match `ftw-tools inference run` with the same checkpoint: on an Iowa scene, the predicted class differs on 11 of 936k pixels, from ONNX and PyTorch floating point ties. That needed two details from the torch pipeline. Patches follow torchgeo's `GriddedPatchSampler` grid, centered on the image (a grid anchored at the corner changes 5.6% of pixels, since the models depend on patch context), and the 2x upsampling is bilinear with aligned corners, matching kornia's `Resize`. Scene selection picks the same scenes. `infer polygonize` differs from ftw-baselines by design, since it splits fields with BoundaryVote instead of taking connected regions.
 
 ## Data
 
@@ -70,7 +70,7 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 ## Milestones
 
 1. `data` query and export, `view`, CI. (Done.)
-2. `imagery`, `models`, ONNX `infer`, and field splitting with BoundaryVote. (Done.)
+2. `imagery`, `models`, `detect`, `predict`, and `polygonize` with BoundaryVote. (Done.)
 3. `catalog`, `join catalog`, and `join sql`.
 4. `view --web`, `schema`, and `SKILL.md`.
 

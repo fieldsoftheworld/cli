@@ -29,6 +29,12 @@ EXTRAS = {
         "fbp",
     ),
 }
+CrsArg = Annotated[
+    str,
+    Parameter(
+        help='CRS to write: an EPSG code such as 3857, or "utm" to keep UTM meters.'
+    ),
+]
 LARGE_AREA_KM2 = 10_000
 
 

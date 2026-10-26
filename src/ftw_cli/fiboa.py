@@ -6,6 +6,7 @@ entry, which also carries properties that are the same for every row, such as
 """
 
 import json
+import tempfile
 from pathlib import Path
 
 import duckdb
@@ -33,15 +34,16 @@ def copy(
     out: Path,
     meta: dict,
     params: list | None = None,
-    geometry_types: list[str] | None = None,
+    crs: str = "EPSG:4326",
 ) -> int:
     """Write the rows of ``query`` to ``out`` and return how many there were.
 
-    ``query`` has a lon/lat GEOMETRY column ``geometry`` and no ``bbox``; this adds the
+    ``query`` has a GEOMETRY column ``geometry`` in ``crs`` and no ``bbox``; this adds the
     bbox covering and sorts rows along a Hilbert curve so readers can skip row groups.
     Batches go through pyarrow because fiboa fixes nullability and timestamp units that
     DuckDB's Parquet writer infers.
     """
+    geo = _geo(con, crs)  # before the reader: DuckDB allows one open result
     reader = con.sql(
         f"""
         with rows as ({query}),
@@ -58,7 +60,7 @@ def copy(
         params=params or [],
     ).to_arrow_reader(ROW_GROUP_SIZE)
     schema = _schema(reader.schema).with_metadata(
-        {"geo": json.dumps(_geo(geometry_types)), "collection": json.dumps(meta)}
+        {"geo": json.dumps(geo), "collection": json.dumps(meta)}
     )
     count = 0
     with pq.ParquetWriter(out, schema, compression="zstd") as writer:
@@ -82,18 +84,31 @@ def _schema(source: pa.Schema) -> pa.Schema:
     return pa.schema(fields)
 
 
-def _geo(geometry_types: list[str] | None) -> dict:
-    # No "crs" means OGC:CRS84, longitude then latitude, which is what the rows hold.
+def _geo(con: duckdb.DuckDBPyConnection, crs: str) -> dict:
+    column = {
+        "encoding": "WKB",
+        "geometry_types": ["Polygon", "MultiPolygon"],
+        "covering": {
+            "bbox": {k: ["bbox", k] for k in ("xmin", "ymin", "xmax", "ymax")}
+        },
+    }
+    # No "crs" means OGC:CRS84, longitude then latitude, which is what 4326 rows hold.
+    if crs != "EPSG:4326":
+        column["crs"] = _projjson(con, crs)
     return {
         "version": "1.1.0",
         "primary_column": "geometry",
-        "columns": {
-            "geometry": {
-                "encoding": "WKB",
-                "geometry_types": geometry_types or ["Polygon", "MultiPolygon"],
-                "covering": {
-                    "bbox": {k: ["bbox", k] for k in ("xmin", "ymin", "xmax", "ymax")}
-                },
-            }
-        },
+        "columns": {"geometry": column},
     }
+
+
+def _projjson(con: duckdb.DuckDBPyConnection, crs: str) -> dict:
+    """PROJJSON for ``crs``, from DuckDB's own GeoParquet writer and the PROJ it bundles."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "crs.parquet"
+        con.execute(
+            f"copy (select ST_SetCRS(ST_Point(0, 0), '{crs}') as geometry) to '{path}'"
+        )
+        return json.loads(pq.read_schema(path).metadata[b"geo"])["columns"]["geometry"][
+            "crs"
+        ]

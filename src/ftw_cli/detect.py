@@ -1,4 +1,4 @@
-"""Run FTW models on a stacked Sentinel-2 GeoTIFF and polygonize the result, without torch."""
+"""Detect fields: predict field and boundary probabilities with ONNX, then split them into polygons."""
 
 import json
 import math
@@ -13,13 +13,13 @@ from fbp import FTW_2E, run_windowed
 from rasterio.features import shapes
 from rasterio.windows import Window
 
-from ftw_cli import __version__, cog, fiboa, models
+from ftw_cli import __version__, cog, fiboa, models, vectors
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
 BANDS = ("field", "boundary")
 
 
-def run(
+def predict(
     input: Path,
     out: Path,
     model: models.ModelName = models.DEFAULT_MODEL,
@@ -99,11 +99,14 @@ def polygonize(
     simplify: float = 15.0,
     min_size: float = 500.0,
     max_size: float | None = None,
+    crs: str = "4326",
 ) -> dict:
-    """Split a ``run`` output into fields with ``fbp.FTW_2E`` and write fiboa GeoParquet.
+    """Split ``predict``'s probabilities into fields with ``fbp.FTW_2E`` and write them to ``out``.
 
     ``simplify`` is a tolerance in meters; ``min_size`` and ``max_size`` are areas in m².
+    ``crs`` is an EPSG code, or ``utm`` for the raster's own CRS.
     """
+    vectors.check(out)
     with rasterio.open(input) as src:
         if not src.crs.is_projected:
             raise ValueError(
@@ -112,12 +115,13 @@ def polygonize(
         if src.count != 2:
             raise ValueError(
                 f"{input} has {src.count} bands; expected field and boundary "
-                "probabilities from `ftw infer run`"
+                "probabilities from `ftw predict`"
             )
         field, boundary = src.read().astype(np.float32) / 255
-        crs = src.crs.to_string()
+        native = src.crs.to_string()
         tags = src.tags()
         transform = src.transform
+    target = vectors.crs(crs, utm=native)
     prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
     del field, boundary
     instances = run_windowed(
@@ -138,7 +142,7 @@ def polygonize(
     max_sql = f"and area <= {float(max_size)}" if max_size else ""
     query = f"""
         select concat('{_sql(input.stem)}-', row_number() over ()) as id,
-               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{crs}', 'EPSG:4326') as geometry,
+               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}') as geometry,
                area::float as "metrics:area", ST_Perimeter(geom)::float as "metrics:perimeter"
         from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
         where area >= {float(min_size)} {max_sql}
@@ -153,8 +157,8 @@ def polygonize(
     )
     if when := _iso(tags.get("TIFFTAG_DATETIME")):
         meta["determination:datetime"] = when
-    count = fiboa.copy(con, query, out, meta)
-    return {"path": str(out), "fields": count, "crs": "EPSG:4326"}
+    count = vectors.write(con, query, out, meta, crs=target)
+    return {"path": str(out), "fields": count, "crs": target}
 
 
 def _sql(text: str) -> str:

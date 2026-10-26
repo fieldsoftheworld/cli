@@ -9,11 +9,10 @@ from pathlib import Path
 
 import duckdb
 
-from ftw_cli import fiboa
+from ftw_cli import vectors
 
 BASE_URL = "https://data.source.coop/ftw/global-data-2e"
 VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
-EXPORT_DRIVERS = {".geojson": "GeoJSON", ".gpkg": "GPKG", ".fgb": "FlatGeobuf"}
 
 Progress = Callable[[int, int | None], None]
 
@@ -146,44 +145,42 @@ def fields(
 
 
 def export(
-    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, out: Path, limit: int | None
+    con: duckdb.DuckDBPyConnection,
+    bbox: BBox,
+    year: int,
+    out: Path,
+    limit: int | None,
+    crs: str = "4326",
 ) -> dict:
     """Write the fields in ``bbox`` to ``out`` in the format its suffix names.
 
-    ``.parquet`` is fiboa GeoParquet with the 2nd Edition's own collection metadata.
+    ``.parquet`` keeps the 2nd Edition's own fiboa collection metadata. ``crs`` is an
+    EPSG code, or ``utm`` for the UTM zone at the center of ``bbox``.
     """
-    suffix = out.suffix.lower()
-    if suffix not in (".parquet", *EXPORT_DRIVERS):
-        raise ValueError(
-            f"unsupported format {suffix!r}; use .parquet, {', '.join(EXPORT_DRIVERS)}"
-        )
+    vectors.check(out)
+    center = ((bbox.xmin + bbox.xmax) / 2, (bbox.ymin + bbox.ymax) / 2)
+    target = vectors.crs(crs, utm=vectors.utm_zone(*center))
     files = hrefs(con, bbox, year)
     if not files:
         raise LookupError(f"no FTW {year} fields intersect {bbox}")
+    # fetchall: DuckDB 2.0 refuses new work while a result is still open.
+    [(meta,)] = con.execute(
+        "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
+        [files[0]],
+    ).fetchall()
     query = f"""
-        select * exclude (bbox, zone) from read_parquet(?)
+        select * exclude (bbox, zone)
+                 replace (ST_Transform(geometry, 'EPSG:4326', '{target}') as geometry)
+        from read_parquet(?)
         where {_in_bbox(bbox)} {f"limit {int(limit)}" if limit else ""}
     """
-    if suffix == ".parquet":
-        # fetchall: DuckDB 2.0 refuses new work while a result is still open.
-        [(meta,)] = con.execute(
-            "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
-            [files[0]],
-        ).fetchall()
-        count = fiboa.copy(con, query, out, json.loads(meta), [files])
-    else:
-        sql = f"copy ({query}) to '{_quote(out)}' (FORMAT gdal, DRIVER '{EXPORT_DRIVERS[suffix]}')"
-        (count,) = con.execute(sql, [files]).fetchone() or (0,)
-    return {"path": str(out), "fields": count}
+    count = vectors.write(con, query, out, json.loads(meta), [files], crs=target)
+    return {"path": str(out), "fields": count, "crs": target}
 
 
 def _in_bbox(bbox: BBox) -> str:
     # The bbox struct lets Parquet skip row groups; ST_Intersects drops bbox-only hits.
     return f"{bbox.overlaps('bbox.')} and ST_Intersects(geometry, {bbox.envelope()})"
-
-
-def _quote(path: Path) -> str:
-    return str(path).replace("'", "''")
 
 
 def _records(rel: duckdb.DuckDBPyConnection) -> list[dict]:

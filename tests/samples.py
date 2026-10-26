@@ -1,7 +1,7 @@
 """Write sample outputs for the conformance job, which checks them with external validators.
 
-Run as ``python tests/samples.py DIR``: writes ``DIR/scores.tif`` (a COG, as ``ftw infer
-run`` writes it) and ``DIR/fields.parquet`` (fiboa, as ``ftw infer polygonize`` writes it).
+Run as ``python tests/samples.py DIR``: writes ``DIR/scores.tif`` (a COG, as ``ftw predict``
+writes it) and ``DIR/fields.parquet`` (fiboa, as ``ftw polygonize`` writes it).
 """
 
 import sys
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
-from ftw_cli import cog, infer
+from ftw_cli import cog, detect
 
 
 def main(out: Path) -> None:
@@ -30,9 +30,9 @@ def main(out: Path) -> None:
         np.stack([field, boundary]),
         profile,
         tags={"FTW_MODEL": "sample", "TIFFTAG_DATETIME": "2024:11:01 17:03:49"},
-        descriptions=infer.BANDS,
+        descriptions=detect.BANDS,
     )
-    result = infer.polygonize(out / "scores.tif", out / "fields.parquet")
+    result = detect.polygonize(out / "scores.tif", out / "fields.parquet")
     assert result["fields"] == 2, result
 
 
