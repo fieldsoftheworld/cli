@@ -3,6 +3,7 @@
 import json
 import math
 from collections.abc import Callable
+from importlib.metadata import version
 from pathlib import Path
 
 import duckdb
@@ -12,7 +13,7 @@ from fbp import FTW_2E, run_windowed
 from rasterio.features import shapes
 from rasterio.windows import Window
 
-from ftw_cli import models
+from ftw_cli import __version__, cog, fiboa, models
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
 BANDS = ("field", "boundary")
@@ -76,18 +77,19 @@ def run(
                 _paste(scores, pred, w, pad)
             if progress:
                 progress(i + len(batch), len(windows))
-        profile = src.profile | {
-            "count": 2,
-            "dtype": "uint8",
-            "nodata": None,
-            "compress": "deflate",
-        }
+        profile = src.profile | {"nodata": None}
         tags = src.tags()
 
-    with rasterio.open(out, "w", **profile) as dst:
-        dst.write(scores)
-        dst.descriptions = BANDS
-        dst.update_tags(**{k: v for k, v in tags.items() if k == "TIFFTAG_DATETIME"})
+    cog.write(
+        out,
+        scores,
+        profile,
+        tags={
+            "FTW_MODEL": model,
+            **{k: v for k, v in tags.items() if k == "TIFFTAG_DATETIME"},
+        },
+        descriptions=BANDS,
+    )
     field, boundary = scores.astype(np.int16)
     return {
         "path": str(out),
@@ -106,7 +108,7 @@ def polygonize(
     min_size: float = 500.0,
     max_size: float | None = None,
 ) -> dict:
-    """Split a ``run`` output into fields with BoundaryVote and write GeoParquet in EPSG:4326.
+    """Split a ``run`` output into fields with BoundaryVote and write fiboa GeoParquet.
 
     Fields come from ``fbp.FTW_2E``, the setting of the FTW 2nd Edition, so touching fields
     stay separate where the predicted boundary divides them. ``simplify`` is a tolerance in
@@ -124,7 +126,7 @@ def polygonize(
             )
         field, boundary = src.read().astype(np.float32) / 255
         crs = src.crs.to_string()
-        stamp = src.tags().get("TIFFTAG_DATETIME")
+        tags = src.tags()
         transform = src.transform
     prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
     del field, boundary
@@ -143,22 +145,36 @@ def polygonize(
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
     con.execute("create table shapes as select unnest(?) as g", [geoms])
-    when = _iso(stamp)
     max_sql = f"and area <= {float(max_size)}" if max_size else ""
-    count = con.execute(
-        f"""
-        copy (
-            select concat('{input.stem}-', row_number() over ()) as id,
-                   ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{crs}', 'EPSG:4326')::GEOMETRY('EPSG:4326') as geometry,
-                   area::float as "metrics:area", ST_Perimeter(geom)::float as "metrics:perimeter",
-                   'auto-imagery' as "determination:method",
-                   {"'" + when + "'::timestamptz" if when else "null::timestamptz"} as "determination:datetime"
-            from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
-            where area >= {float(min_size)} {max_sql}
-        ) to '{str(out).replace("'", "''")}' (format parquet)
-        """
-    ).fetchone()[0]
+    query = f"""
+        select concat('{_sql(input.stem)}-', row_number() over ()) as id,
+               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{crs}', 'EPSG:4326') as geometry,
+               area::float as "metrics:area", ST_Perimeter(geom)::float as "metrics:perimeter"
+        from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
+        where area >= {float(min_size)} {max_sql}
+    """
+    model = tags.get("FTW_MODEL", "an FTW model")
+    meta = fiboa.collection(
+        "ftw-cli",
+        **{
+            "determination:method": "auto-imagery",
+            "determination:details": (
+                f"{model} on Sentinel-2 with ftw-cli {__version__}, fields split "
+                f"with BoundaryVote (fbp.FTW_2E, ftw-fbp {version('ftw-fbp')})"
+            ),
+        },
+        **(
+            {"determination:datetime": when}
+            if (when := _iso(tags.get("TIFFTAG_DATETIME")))
+            else {}
+        ),
+    )
+    count = fiboa.copy(con, query, out, meta)
     return {"path": str(out), "fields": count, "crs": "EPSG:4326"}
+
+
+def _sql(text: str) -> str:
+    return text.replace("'", "''")
 
 
 def _starts(length: int, size: int, stride: int) -> list[int]:

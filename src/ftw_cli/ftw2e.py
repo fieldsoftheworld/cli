@@ -9,6 +9,8 @@ from pathlib import Path
 
 import duckdb
 
+from ftw_cli import fiboa
+
 BASE_URL = "https://data.source.coop/ftw/global-data-2e"
 VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
 
@@ -162,31 +164,40 @@ def fields(
 def export(
     con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, out: Path, limit: int | None
 ) -> dict:
-    """Write the fields intersecting ``bbox`` to ``out``; the format follows its suffix."""
+    """Write the fields intersecting ``bbox`` to ``out``; the format follows its suffix.
+
+    ``.parquet`` is fiboa GeoParquet with the 2nd Edition's own collection metadata.
+    """
     hrefs = [f["href"] for f in files(con, bbox, year)]
     if not hrefs:
         raise LookupError(f"no FTW {year} fields intersect {bbox}")
     suffix = out.suffix.lower()
-    if suffix == ".parquet":
-        fmt = "FORMAT parquet"
-    elif suffix in EXPORT_DRIVERS:
-        fmt = f"FORMAT gdal, DRIVER '{EXPORT_DRIVERS[suffix]}'"
-    else:
+    if suffix not in (".parquet", *EXPORT_DRIVERS):
         supported = ", ".join([".parquet", *EXPORT_DRIVERS])
         raise ValueError(
             f"unsupported output format {suffix!r}; use one of {supported}"
         )
     limit_sql = f"limit {int(limit)}" if limit else ""
-    con.execute(
-        f"""
-        copy (
-            select * exclude (bbox, zone) from read_parquet(?)
-            where {_in_bbox(bbox)} {limit_sql}
-        ) to '{_quote(out)}' ({fmt})
-        """,
-        [hrefs],
-    )
-    return {"path": str(out), "files_read": len(hrefs)}
+    query = f"""
+        select * exclude (bbox, zone) from read_parquet(?)
+        where {_in_bbox(bbox)} {limit_sql}
+    """
+    if suffix == ".parquet":
+        row = con.execute(
+            "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
+            [hrefs[0]],
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"{hrefs[0]} has no fiboa collection metadata")
+        count = fiboa.copy(con, query, out, json.loads(row[0]), [hrefs])
+    else:
+        driver = EXPORT_DRIVERS[suffix]
+        row = con.execute(
+            f"copy ({query}) to '{_quote(out)}' (FORMAT gdal, DRIVER '{driver}')",
+            [hrefs],
+        ).fetchone()
+        count = row[0] if row else 0
+    return {"path": str(out), "fields": count, "files_read": len(hrefs)}
 
 
 def _in_bbox(bbox: BBox) -> str:

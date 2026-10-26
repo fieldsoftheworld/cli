@@ -20,6 +20,7 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
 
+from ftw_cli import cog
 from ftw_cli.ftw2e import BBox
 
 CROP_CALENDAR = "https://data.source.coop/ftw/ftw-inference-input/global-crop-calendar/"
@@ -167,24 +168,15 @@ def download(
             ]
 
     latest = max(i.datetime for i in items)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
+    cog.write(
         out,
-        "w",
-        driver="GTiff",
-        width=width,
-        height=height,
-        count=len(stack),
-        dtype="uint16",
-        crs=crs,
-        transform=transform,
-        compress="deflate",
-        tiled=True,
-        blockxsize=256,
-        blockysize=256,
-    ) as dst:
-        dst.write(np.stack(stack))
-        dst.update_tags(TIFFTAG_DATETIME=latest.strftime("%Y:%m:%d %H:%M:%S"))
+        np.stack(stack),
+        {"crs": crs, "transform": transform, "width": width, "height": height},
+        tags={"TIFFTAG_DATETIME": latest.strftime("%Y:%m:%d %H:%M:%S")},
+        descriptions=tuple(
+            f"{band} {item.datetime:%Y-%m-%d}" for item in items for band in BANDS[host]
+        ),
+    )
     return {
         "path": str(out),
         "width": width,
