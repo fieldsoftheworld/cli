@@ -7,7 +7,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 
 `ftw` queries the FTW 2nd Edition, field boundaries for 2017 to 2025 worldwide, where it is published, and runs FTW models on new Sentinel-2 imagery. Piped output is JSON on stdout. Progress, the geocoded place, and errors go to stderr.
 
-- `data query` prints `{year, fields, area_ha, mean_score}`, with `area_ha` the total field area in hectares. `data history` prints a list of those, one per year.
+- `data query` prints `{year, fields, area_ha, mean_score}`, with `area_ha` the total field area in hectares. With several years (`--year 2019..2024`, `2018,2024`, or `all`) it prints a list of those, one per year.
 - With `--out`, the output includes `{path, fields, crs}`, so `crs` confirms the CRS written.
 - Without `--year`, `data query` uses the latest year (2025). An area with no published fields gives `fields: 0`, and `--out` then fails with an error.
 
@@ -16,8 +16,8 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | Need | Command |
 |---|---|
 | Field count, area, and mean score in an area | `ftw data query AREA [--year Y]` |
-| The fields themselves | `ftw data query AREA --year Y --out fields.parquet` |
-| How the fields changed over the years | `ftw data history AREA` |
+| The fields themselves, for one or several years (with a `year` column) | `ftw data query AREA --year Y --out fields.parquet` |
+| How the fields changed over the years | `ftw data query AREA --year all` |
 | Fields in imagery from any year, including ones the 2nd Edition lacks | `ftw detect AREA --year Y --out fields.gpkg` |
 | A picture of the fields | `ftw view AREA --out map.png` |
 | Whether the install and network work | `ftw doctor` |
@@ -38,7 +38,7 @@ AREA is a quoted place name (`"Story County, Iowa"`), `xmin,ymin,xmax,ymax` in d
 
 ```sh
 ftw data query "Chartres, France" --year 2023 | jq .fields
-ftw data history "Ames, Iowa" | jq '.[] | {year, fields}'
+ftw data query "Ames, Iowa" --year all | jq '.[] | {year, fields}'
 ftw data query "Story County, Iowa" --year 2023 --out story.gpkg --crs utm | jq .crs
 ftw data query "-93.7,41.95,-93.6,42.05" --out ames.parquet
 ftw detect "Poltava, Ukraine" --year 2024 --out poltava.gpkg

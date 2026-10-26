@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import AreaArg, CrsArg, YearArg, parse_area
+from ftw_cli.cli_args import AreaArg, CrsArg, YearArg, YearsArg, parse_area
 from ftw_cli.cli_detect import detect, imagery, models, polygonize, predict
 from ftw_cli.progress import bar, spinner
 
@@ -26,7 +26,7 @@ app.register_install_completion_command()
 
 EXAMPLES = [
     ("Explore", 'ftw data query "Story County, Iowa"'),
-    ("", 'ftw data history "Beauce, France"'),
+    ("", 'ftw data query "Beauce, France" --year all'),
     ("", 'ftw view "Chartres, France" --out chartres.png'),
     ("Detect", 'ftw detect "Poltava, Ukraine" --year 2024 --out poltava.gpkg'),
 ]
@@ -81,7 +81,7 @@ def info():
 def query(
     area: AreaArg,
     *,
-    year: YearArg = None,
+    year: YearsArg = None,
     out: Annotated[
         Path | None,
         Parameter(
@@ -93,25 +93,20 @@ def query(
     ] = None,
     crs: CrsArg = "4326",
 ):
-    """Summarize the fields in AREA, or write them to a file with --out."""
+    """Summarize the fields in AREA per year, or write them to a file with --out."""
     box = parse_area(area)
     con = ftw2e.connect()
-    year = year or ftw2e.years(con)[-1]
+    years = ftw2e.parse_years(year, ftw2e.years(con))
+    label = f"{years[0]}" if len(years) == 1 else f"{years[0]}-{years[-1]}"
     if out:
-        with spinner(f"Writing FTW {year} fields to {out}"):
-            result = ftw2e.export(con, box, year, out, limit, crs)
-    else:
-        with spinner(f"Reading FTW {year} fields"):
-            result = ftw2e.summarize(con, box, year)
-    output.emit(result, title=f"FTW {year} fields")
-
-
-@data.command
-def history(area: AreaArg):
-    """Fields, area, and mean score in AREA for every year."""
-    box = parse_area(area)
-    with bar("Reading every year") as progress:
-        rows = ftw2e.history(box, progress)
+        with spinner(f"Writing FTW {label} fields to {out}"):
+            output.emit(ftw2e.export(con, box, years, out, limit, crs))
+        return
+    with bar(f"Reading FTW {label} fields") as progress:
+        rows = ftw2e.summaries(box, years, progress)
+    if len(rows) == 1:
+        output.emit(rows[0], title=f"FTW {label} fields")
+        return
     output.emit(rows, title="FTW fields by year")
     output.trend("fields", [r["fields"] for r in rows], [r["year"] for r in rows])
 

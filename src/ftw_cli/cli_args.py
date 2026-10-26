@@ -21,6 +21,12 @@ AreaArg = Annotated[
 YearArg = Annotated[
     int | None, Parameter(help="Dataset year (2017-2025). Defaults to the latest.")
 ]
+YearsArg = Annotated[
+    str | None,
+    Parameter(
+        help="A year (2024), a range (2019..2024), a list (2018,2021), or all. Defaults to the latest."
+    ),
+]
 EXTRAS = {
     "imagery": ("rasterio", "pystac_client", "planetary_computer"),
     "inference": (
