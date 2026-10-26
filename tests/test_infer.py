@@ -91,5 +91,10 @@ def test_softmax_and_paste_keep_both_score_bands():
     probs = infer._softmax(logits)
     assert np.allclose(probs.sum(axis=1), 1) and probs[0, 1].min() > 0.99
     scores = np.zeros((2, 4, 4), dtype=np.uint8)
-    infer._paste(scores, np.full((2, 4, 4), 7, np.uint8), infer.Window.from_slices((0, 4), (0, 4)), 1)
+    infer._paste(
+        scores,
+        np.full((2, 4, 4), 7, np.uint8),
+        infer.Window.from_slices((0, 4), (0, 4)),
+        1,
+    )
     assert (scores == 7).all()
