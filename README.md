@@ -26,7 +26,7 @@ ftw data query "Poltava, Ukraine" --year 2024 --out poltava.parquet
 ftw view "Chartres, France" --out chartres.png       # a map of the fields
 ```
 
-`--out` writes `.parquet`, `.geojson`, `.gpkg`, or `.fgb`. Queries read only the parts of the 2nd Edition that overlap the area, so a county in Iowa takes about 8 seconds.
+`--out` writes `.parquet`, `.geojson`, `.gpkg`, or `.fgb`. Parquet output is [fiboa](https://fiboa.org) GeoParquet, as the 2nd Edition publishes it, sorted along a Hilbert curve with a bbox column so other readers can filter it by area. Queries read only the parts of the 2nd Edition that overlap the area, so a county in Iowa takes about 8 seconds.
 
 `ftw data history` ends its table of the nine years with a trend line:
 
@@ -48,7 +48,7 @@ ftw infer run ames.tif --out scores.tif --model prue-ccby-b7
 ftw infer polygonize scores.tif --out fields.parquet
 ```
 
-`ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The polygons are GeoParquet in EPSG:4326 with the same columns as the 2nd Edition.
+`ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The imagery and the field and boundary probabilities are Cloud Optimized GeoTIFFs, and the fields are fiboa GeoParquet with the model and BoundaryVote setting recorded in the file's metadata. CI checks sample outputs with `fiboa validate` and `rio cogeo validate`, so they open in QGIS, lonboard, GDAL, and the fiboa tools.
 
 ## For scripts and agents
 

@@ -33,3 +33,17 @@ jobs:
       - run: uv run pytest
       - if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
         run: uv run pytest -m integration
+
+  conformance:
+    # The outputs checked by the validators other tools use: fiboa's and rio-cogeo's.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked --all-extras
+      - run: uv run python tests/samples.py samples
+      - run: uvx --from 'fiboa-cli>=0.21,<0.22' fiboa validate samples/fields.parquet
+      - run: uvx --from rio-cogeo rio cogeo validate --strict samples/scores.tif

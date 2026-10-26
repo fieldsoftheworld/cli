@@ -49,8 +49,14 @@ def test_polygonize_measures_meters_and_writes_wgs84(tmp_path):
     assert result["fields"] == 1
     table = pq.read_table(tmp_path / "fields.parquet")
     assert table.column("metrics:area")[0].as_py() == pytest.approx(40_000)
-    crs = json.loads(table.schema.metadata[b"geo"])["columns"]["geometry"]["crs"]
-    assert crs["id"] == {"authority": "EPSG", "code": 4326}
+    geo = json.loads(table.schema.metadata[b"geo"])["columns"]["geometry"]
+    assert "crs" not in geo  # GeoParquet's default, OGC:CRS84
+    collection = json.loads(table.schema.metadata[b"collection"])
+    assert (
+        "https://fiboa.org/specification/v0.3.0/schema.yaml"
+        in collection["schemas"]["ftw-cli"]
+    )
+    assert collection["determination:method"] == "auto-imagery"
 
 
 def test_polygonize_splits_touching_fields_at_the_boundary(tmp_path):
