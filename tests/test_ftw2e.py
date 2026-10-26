@@ -1,5 +1,6 @@
 import json
 
+import duckdb
 import pyarrow.parquet as pq
 import pytest
 
@@ -101,3 +102,37 @@ def test_multi_year_export_has_a_row_per_field_per_year(tmp_path):
         assert len(rows) == ftw2e.summarize(con, IOWA, year)["fields"]
         assert {r["collection"] for r in rows} == {f"ftw-s2-{year}"}
     assert result["fields"] == len(table)
+
+
+def test_size_stats_on_known_areas(tmp_path):
+    path = tmp_path / "fields.parquet"
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial")
+    # 0.5, 2, 50, and 150 ha: one field in each size class
+    con.execute(
+        f"""
+        copy (
+            select a * 1e4 as "metrics:area",
+                   ST_MakeEnvelope(i, i, i + 0.1, i + 0.1) as geometry,
+                   struct_pack(xmin := i, ymin := i, xmax := i + 0.1, ymax := i + 0.1) as bbox
+            from (values (0, 0.5), (1, 2.0), (2, 50.0), (3, 150.0)) t(i, a)
+        ) to '{path}'
+        """
+    )
+    box = ftw2e.BBox(-1, -1, 5, 5)
+    stats = ftw2e.size_stats(ftw2e.connect(), box, [str(path)])
+
+    assert stats["median_ha"] == 26.0  # halfway between 2 and 50
+    assert [stats[f"fields_{c}"] for c, *_ in ftw2e.SIZE_CLASSES] == [1, 1, 1, 1]
+    assert stats["area_ge_100ha_ha"] == 150.0
+
+
+@pytest.mark.integration
+def test_size_classes_add_up_to_the_summary():
+    summary = ftw2e.summarize(ftw2e.connect(), IOWA, 2024, stats=True)
+    classes = [c for c, *_ in ftw2e.SIZE_CLASSES]
+    assert sum(summary[f"fields_{c}"] for c in classes) == summary["fields"]
+    assert sum(summary[f"area_{c}_ha"] for c in classes) == pytest.approx(
+        summary["area_ha"], abs=0.5
+    )
+    assert summary["p25_ha"] <= summary["median_ha"] <= summary["p75_ha"]
