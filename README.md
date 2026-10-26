@@ -21,14 +21,14 @@ An area is a place name, `xmin,ymin,xmax,ymax` in degrees, or a polygon file (`.
 
 ```sh
 ftw data query "Story County, Iowa"                  # field count, area, mean score
-ftw data history "Ames, Iowa"                        # the same for every year, with a trend line
-ftw data query "Poltava, Ukraine" --year 2024 --out poltava.parquet
+ftw data query "Ames, Iowa" --year all              # the same for every year, with a trend line
+ftw data query "Poltava, Ukraine" --year 2019..2024 --out poltava.parquet
 ftw view "Chartres, France" --out chartres.png       # a map of the fields
 ```
 
-`--out` writes `.parquet`, `.geojson`, `.gpkg`, or `.fgb`. Parquet output is [fiboa](https://fiboa.org) GeoParquet, as the 2nd Edition publishes it, sorted along a Hilbert curve with a bbox column so other readers can filter it by area. Queries read only the parts of the 2nd Edition that overlap the area, so a county in Iowa takes about 8 seconds.
+`--out` writes `.parquet`, `.geojson`, `.gpkg`, or `.fgb`. Parquet output is [fiboa](https://fiboa.org) GeoParquet, as the 2nd Edition publishes it, sorted along a Hilbert curve with a bbox column so other readers can filter it by area. Queries read only the parts of the 2nd Edition that overlap the area, so a county in Iowa takes about 8 seconds. An export of several years is one file with a `year` column; in Parquet, each row's `collection` names its year's 2nd Edition collection.
 
-`ftw data history` ends its table of the nine years with a trend line:
+`--year` takes one year, a range (`2019..2024`), a list (`2018,2021,2024`), or `all`. Several years give one summary row per year, ending with a trend line:
 
 ```text
 fields  2017 █▅█▇▁▃▄▄▄ 2025  -14% since 2017

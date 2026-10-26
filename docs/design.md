@@ -24,8 +24,7 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 Working now:
 
 - `ftw data info`: per-year totals for the 2nd Edition.
-- `ftw data query AREA [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
-- `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
+- `ftw data query AREA [--year] [--out] [--limit]`: summary stats per year, with a sparkline of the field count when there are several, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb` with a `year` column. `--year` is one year, `2019..2024`, `2018,2021`, or `all`; the years are read in parallel. A multi-year Parquet keeps each year's collection under `schemas`, each row's `collection` column says which applies, and properties that differ by year (`determination:details`) become columns.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
 - `ftw doctor`: versions, extras, GPU, cache, and whether each remote service answers, run in parallel.
