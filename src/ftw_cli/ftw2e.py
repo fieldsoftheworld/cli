@@ -1,90 +1,21 @@
 """FTW Global Data 2nd Edition on Source Coop, queried in place with DuckDB."""
 
 import json
-import math
 import re
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
-from ftw_cli import vectors
+from ftw_cli import fiboa, vectors
+from ftw_cli.areas import BBox
 from ftw_cli.filters import NO_FILTERS, Filters
+from ftw_cli.progress import Progress
 
 BASE_URL = "https://data.source.coop/ftw/global-data-2e"
 VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
-
-Progress = Callable[[int, int | None], None]
 YEARS = re.compile(r"^\d{4}(\.\.\d{4}|(,\d{4})*)$")
-
-
-@dataclass(frozen=True)
-class BBox:
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float
-    # The area's polygon (WKT, EPSG:4326) when it is not the whole box, as from a file.
-    shape: str | None = field(default=None, repr=False)
-
-    @classmethod
-    def parse(cls, text: str) -> "BBox":
-        """Parse ``xmin,ymin,xmax,ymax`` in EPSG:4326 degrees."""
-        parts = text.split(",")
-        if len(parts) != 4:
-            raise ValueError(f"bbox needs 4 comma-separated numbers, got {text!r}")
-        xmin, ymin, xmax, ymax = (float(p) for p in parts)
-        box = cls(xmin, ymin, xmax, ymax)
-        if not (
-            -180 <= box.xmin < box.xmax <= 180 and -90 <= box.ymin < box.ymax <= 90
-        ):
-            raise ValueError(
-                f"bbox must be xmin<xmax in -180..180, ymin<ymax in -90..90: {text!r}"
-            )
-        return box
-
-    @property
-    def bounds(self) -> tuple[float, float, float, float]:
-        return self.xmin, self.ymin, self.xmax, self.ymax
-
-    def __str__(self) -> str:
-        return ",".join(f"{v:g}" for v in self.bounds)
-
-    def overlaps(self, prefix: str = "") -> str:
-        """SQL predicate for rows whose ``{prefix}xmin..ymax`` bounds intersect this box."""
-        p = prefix
-        return (
-            f"{p}xmax >= {self.xmin} and {p}xmin <= {self.xmax} "
-            f"and {p}ymax >= {self.ymin} and {p}ymin <= {self.ymax}"
-        )
-
-    def envelope(self) -> str:
-        """SQL for the area: its polygon when it has one, else the box."""
-        if self.shape:
-            return f"ST_GeomFromText('{self.shape}')"
-        return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
-
-    def area_km2(self) -> float:
-        lat = math.radians((self.ymin + self.ymax) / 2)
-        return (
-            (self.xmax - self.xmin)
-            * (self.ymax - self.ymin)
-            * 111.32**2
-            * math.cos(lat)
-        )
-
-
-def connect() -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
-    con.execute("SET geometry_always_xy = true; SET enable_progress_bar = false")
-    # DuckDB 2.0.0 crashes ("Vector::Reference used on vector of different type")
-    # on ORDER BY ... LIMIT over a filter on the bbox struct with this optimizer on.
-    con.execute("SET disabled_optimizers = 'late_materialization'")
-    return con
 
 
 def info(con: duckdb.DuckDBPyConnection) -> list[dict]:
@@ -211,7 +142,7 @@ def summaries(
     """``summarize`` for each year, each on its own connection so the years run at once."""
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [
-            pool.submit(summarize, connect(), bbox, year, filters, stats)
+            pool.submit(summarize, vectors.connect(), bbox, year, filters, stats)
             for year in years
         ]
         for done, _ in enumerate(as_completed(futures), 1):
@@ -261,26 +192,21 @@ def export(
     ``crs`` is an EPSG code, or ``utm`` for the UTM zone at the center of ``bbox``.
     """
     vectors.check(out)
-    center = ((bbox.xmin + bbox.xmax) / 2, (bbox.ymin + bbox.ymax) / 2)
-    target = vectors.crs(crs, utm=vectors.utm_zone(*center))
+    target = vectors.crs(crs, utm=vectors.utm_zone(*bbox.center))
     files = {year: hrefs(con, bbox, year) for year in years}
     if not any(files.values()):
         raise LookupError(f"no FTW fields for {years} intersect {bbox}")
     files = {year: hrefs_ for year, hrefs_ in files.items() if hrefs_}
-    # fetchall: DuckDB 2.0 refuses new work while a result is still open.
     metas = {
-        year: json.loads(
-            con.execute(
-                "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
-                [hrefs_[0]],
-            ).fetchall()[0][0]
-        )
+        year: fiboa.read_collection(con, hrefs_[0]) or {}
         for year, hrefs_ in files.items()
     }
     meta, varying = _collection(list(metas.values()))
     selects = []
     for year in files:
-        extra = "".join(f', {_literal(metas[year][key])} as "{key}"' for key in varying)
+        extra = "".join(
+            f', {vectors.quote(metas[year][key])} as "{key}"' for key in varying
+        )
         selects.append(
             f"""
             select * exclude (bbox, zone)
@@ -304,7 +230,7 @@ def _collection(metas: list[dict]) -> tuple[dict, list[str]]:
     ``collection``, which the rows already carry.
     """
     meta: dict[str, Any] = {
-        "schemas": {k: v for m in metas for k, v in m["schemas"].items()}
+        "schemas": {k: v for m in metas for k, v in m.get("schemas", {}).items()}
     }
     varying = []
     for key in dict.fromkeys(k for m in metas for k in m if k != "schemas"):
@@ -319,10 +245,6 @@ def _collection(metas: list[dict]) -> tuple[dict, list[str]]:
         "description": "FTW 2nd Edition year the field was mapped for",
     }
     return meta, varying
-
-
-def _literal(value: object) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def select(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> tuple[str, list]:

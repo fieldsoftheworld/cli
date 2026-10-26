@@ -2,6 +2,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from ftw_cli import fiboa, ftw2e, match, vectors
+from ftw_cli.areas import BBox
 
 X0, Y0 = 450_000, 4_650_000  # near Ames, in UTM zone 15N
 # (x0, x1) of 100 m tall squares
@@ -20,7 +21,7 @@ def boxes(spans: list[tuple[int, int]]) -> str:
 
 @pytest.fixture
 def con():
-    con = ftw2e.connect()
+    con = vectors.connect()
     match.load(con, "a", boxes(REFERENCE))
     match.load(con, "b", boxes(PREDICTION))
     assert match.project(con, "a", "b") == "EPSG:32615"
@@ -44,7 +45,7 @@ def test_lower_threshold_matches_greedily_one_to_one(con):
 
 
 def test_a_set_matches_itself_exactly():
-    con = ftw2e.connect()
+    con = vectors.connect()
     match.load(con, "a", boxes(REFERENCE))
     match.load(con, "b", boxes(REFERENCE))
     match.project(con, "a", "b")
@@ -54,7 +55,7 @@ def test_a_set_matches_itself_exactly():
 
 
 def test_files_in_different_crs_match(tmp_path):
-    con = ftw2e.connect()
+    con = vectors.connect()
     geo, parquet = tmp_path / "a.geojson", tmp_path / "b.parquet"
     reproject = "select id, ST_Transform(geometry, '{}') as geometry from ({})"
     vectors.write(con, reproject.format("EPSG:4326", boxes(REFERENCE)), geo, {})
@@ -65,8 +66,8 @@ def test_files_in_different_crs_match(tmp_path):
         fiboa.collection("t"),
         crs="EPSG:3857",
     )
-    match.load_file(con, "a", geo)
-    match.load_file(con, "b", parquet)
+    match.load(con, "a", f"select * from {vectors.source(geo)}")
+    match.load(con, "b", f"select * from {vectors.source(parquet)}")
     match.project(con, "a", "b")
     result = match.compare(con)
     assert (result.matched, result.merges, result.splits) == (5, 0, 0)
@@ -86,8 +87,8 @@ def test_write_prediction_adds_the_match(con, tmp_path):
 
 @pytest.mark.integration
 def test_changes_add_up_to_each_years_fields():
-    con = ftw2e.connect()
-    box = ftw2e.BBox(-93.70, 41.95, -93.60, 42.05)
+    con = vectors.connect()
+    box = BBox(-93.70, 41.95, -93.60, 42.05)
     match.load(con, "a", *ftw2e.select(con, box, 2018))
     match.load(con, "b", *ftw2e.select(con, box, 2024))
     match.project(con, "a", "b")
@@ -97,7 +98,7 @@ def test_changes_add_up_to_each_years_fields():
 
 
 def test_changes_label_every_field_of_both_years(tmp_path):
-    con = ftw2e.connect()
+    con = vectors.connect()
     match.load(con, "a", boxes([*REFERENCE, (3000, 3100)]))  # the last overlaps nothing
     match.load(con, "b", boxes(PREDICTION))
     match.project(con, "a", "b")

@@ -36,41 +36,21 @@ class Comparison:
 def load(
     con: duckdb.DuckDBPyConnection, table: str, query: str, params: list | None = None
 ) -> None:
-    """Create ``table`` (rid, id, geom) from ``query``'s rows and its first GEOMETRY column.
+    """Create ``table`` (rid, id, geom) from ``query``'s rows, which have a ``geometry``.
 
-    The geometry keeps its CRS; ``project`` puts both sides in one before measuring.
+    Rows without an ``id`` are numbered. ``project`` puts both sides in one CRS.
     """
-    rel = con.sql(query, params=params or [])
-    geom = next(
-        (
-            name
-            for name, kind in zip(rel.columns, rel.types, strict=True)
-            if "GEOMETRY" in str(kind).upper()
-        ),
-        None,
-    )
-    if geom is None:
-        raise ValueError(f"no geometry column in {query!r}")
-    ident = '"id"::varchar' if "id" in rel.columns else "rid::varchar"
+    columns = con.sql(query, params=params or []).columns
+    ident = '"id"::varchar' if "id" in columns else "rid::varchar"
     con.execute(
         f"""
         create or replace temp table {table} as
-        select rid, {ident} as id, "{geom}" as geom
+        select rid, {ident} as id, geometry as geom
         from (select row_number() over () as rid, * from ({query}))
-        where "{geom}" is not null
+        where geometry is not null
         """,
         params or [],
     )
-
-
-def load_file(con: duckdb.DuckDBPyConnection, table: str, path: Path) -> None:
-    """``load`` from a .parquet, .gpkg, .geojson, or .fgb file."""
-    vectors.check(path)
-    quoted = str(path).replace("'", "''")
-    source = (
-        f"'{quoted}'" if path.suffix.lower() == ".parquet" else f"ST_Read('{quoted}')"
-    )
-    load(con, table, f"select * from {source}")
 
 
 def project(con: duckdb.DuckDBPyConnection, *tables: str) -> str:

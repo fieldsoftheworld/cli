@@ -1,8 +1,7 @@
-"""Detect fields: predict field and boundary probabilities with ONNX, then split them into polygons."""
+"""Run FTW models with onnxruntime and split their probabilities into fields with BoundaryVote."""
 
 import json
 import math
-from collections.abc import Callable
 from importlib.metadata import version
 from pathlib import Path
 
@@ -15,8 +14,9 @@ from rasterio.features import shapes
 from rasterio.windows import Window
 
 from ftw_cli import __version__, cog, fiboa, models, vectors
+from ftw_cli.areas import BBox
 from ftw_cli.filters import Filters
-from ftw_cli.ftw2e import BBox
+from ftw_cli.progress import Progress
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
 BANDS = ("field", "boundary")
@@ -46,7 +46,7 @@ def predict(
     model: models.ModelName = models.DEFAULT_MODEL,
     patch_size: int | None = None,
     batch_size: int = 4,
-    progress: Callable[[int, int | None], None] | None = None,
+    progress: Progress | None = None,
 ) -> dict:
     """Write field and boundary probabilities (uint8, p * 255) for ``input`` to a COG."""
     spec = models.MODELS[model]
@@ -142,8 +142,7 @@ def polygonize(
         tags = src.tags()
         transform = src.transform
     target = vectors.crs(crs, utm=native)
-    con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
+    con = vectors.connect()
     inside = "true"
     if area and area.shape:
         inside = f"ST_Intersects(ST_Transform(geom, '{native}', 'EPSG:4326'), {area.envelope()})"
@@ -157,7 +156,7 @@ def polygonize(
         simplify,
         min_area,
         max_area,
-        keep=inside,
+        inside,
     )
     meta = collection(tags.get("FTW_MODEL", "an FTW model"), "Sentinel-2")
     if when := _iso(tags.get("TIFFTAG_DATETIME")):
@@ -220,7 +219,7 @@ def split_into(
     con.execute(
         f"""
         insert into fields
-        select concat('{_sql(prefix)}-', row_number() over ()),
+        select concat({vectors.quote(prefix + "-")}, row_number() over ()),
                ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}'),
                area::float, ST_Perimeter(geom)::float,
                least(100, greatest(0, round(field_prob * 100)))::utinyint,
@@ -265,10 +264,6 @@ def collection(model: str, imagery: str) -> dict:
             "schemas:custom": SCORE_SCHEMA,
         },
     )
-
-
-def _sql(text: str) -> str:
-    return text.replace("'", "''")
 
 
 def _starts(length: int, size: int, stride: int) -> list[int]:

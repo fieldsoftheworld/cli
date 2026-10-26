@@ -1,4 +1,4 @@
-"""``ftw detect``, ``predict``, and ``polygonize``, plus ``imagery`` and ``models``."""
+"""``ftw detect``, ``predict``, ``polygonize``, ``imagery``, and ``models``."""
 
 import tempfile
 from dataclasses import asdict
@@ -9,51 +9,49 @@ from cyclopts import App, Parameter, validators
 
 from ftw_cli import models as registry
 from ftw_cli import output, vectors
-from ftw_cli.cli_args import AreaArg, CrsArg, MaxArea, MinArea, parse_area, require
-from ftw_cli.ftw2e import BBox
+from ftw_cli.areas import BBox
+from ftw_cli.cli_args import (
+    AreaArg,
+    CrsArg,
+    FieldsOut,
+    MaxArea,
+    MinArea,
+    parse_area,
+    require,
+)
 from ftw_cli.progress import bar, spinner
 
-imagery = App(name="imagery", help="Find and download Sentinel-2 scenes for an area.")
-models = App(name="models", help="Released FTW models the CLI can run.")
+imagery = App(name="imagery", help="Sentinel-2 scenes from the crop calendar.")
+models = App(name="models", help="Released FTW models.")
 
-ModelName = Annotated[
-    registry.ModelName, Parameter(help="Model to run; see `ftw models list`.")
-]
+ModelName = Annotated[registry.ModelName, Parameter(help="Model to run.")]
 Host = Annotated[
     Literal["mspc", "earthsearch"],
-    Parameter(
-        help="STAC host: Microsoft Planetary Computer or Element 84 EarthSearch."
-    ),
+    Parameter(help="STAC API: Planetary Computer or EarthSearch."),
 ]
-SceneYear = Annotated[int, Parameter(help="Growing season year.")]
-BufferDays = Annotated[
-    int, Parameter(help="Days either side of the crop calendar date.")
-]
-CloudMax = Annotated[float, Parameter(help="Maximum scene cloud cover, in percent.")]
+Year = Annotated[int, Parameter(help="Growing season year.")]
+BufferDays = Annotated[int, Parameter(help="Days either side of the season dates.")]
+CloudMax = Annotated[float, Parameter(help="Maximum scene cloud cover, %.")]
 ImageryTif = Annotated[
     Path,
     Parameter(
         validator=validators.Path(exists=True, dir_okay=False),
-        help="Imagery COG from `ftw imagery download`.",
+        help="Imagery from `ftw imagery download`.",
     ),
 ]
 ScoresTif = Annotated[
     Path,
     Parameter(
         validator=validators.Path(exists=True, dir_okay=False),
-        help="Probabilities COG from `ftw predict`.",
+        help="Probabilities from `ftw predict`.",
     ),
 ]
-FieldsOut = Annotated[
-    Path, Parameter(help="Fields to write: .parquet (fiboa), .gpkg, .geojson, or .fgb.")
-]
-Simplify = Annotated[float, Parameter(help="Simplification tolerance in meters.")]
 
 
 def detect(
     area: AreaArg,
     *,
-    year: SceneYear,
+    year: Year,
     out: FieldsOut,
     crs: CrsArg = "4326",
     min_area: MinArea = 500,
@@ -61,18 +59,17 @@ def detect(
     model: ModelName = registry.DEFAULT_MODEL,
     keep: Annotated[
         Path | None,
-        Parameter(
-            help="Keep the rasters in this directory; with ftw-q, a rerun reuses their scores."
-        ),
+        Parameter(help="Keep rasters here; ftw-q reruns reuse them."),
     ] = None,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Find fields in AREA: get imagery for YEAR, run MODEL, split into polygons.
+    """Detect fields in AREA for YEAR.
 
-    ftw-q, the default, runs on the year's quarterly mosaics tile by tile as the 2nd Edition
-    was made; the PRUE models run on two scenes picked from the crop calendar.
+    ftw-q runs on the year's quarterly mosaics, tile by tile, as the 2nd Edition was
+    made. The PRUE models run on two scenes from the crop calendar (--host,
+    --buffer-days, --cloud-cover-max).
     """
     vectors.check(out)
     if crs.lower() != "utm":
@@ -95,9 +92,9 @@ def detect(
 def predict(
     input: ImageryTif,
     *,
-    out: Annotated[Path, Parameter(help="COG of field and boundary probabilities.")],
+    out: Annotated[Path, Parameter(help="Field and boundary probabilities COG.")],
     model: ModelName = registry.DEFAULT_MODEL,
-    patch_size: Annotated[int | None, Parameter(help="Pixels per patch.")] = None,
+    patch_size: Annotated[int | None, Parameter(help="Patch size, px.")] = None,
     batch_size: Annotated[int, Parameter(help="Patches per model call.")] = 4,
 ):
     """Predict field and boundary probabilities for INPUT."""
@@ -109,7 +106,7 @@ def polygonize(
     *,
     out: FieldsOut,
     crs: CrsArg = "4326",
-    simplify: Simplify = 15,
+    simplify: Annotated[float, Parameter(help="Simplification tolerance, m.")] = 15,
     min_area: MinArea = 500,
     max_area: MaxArea = None,
 ):
@@ -121,12 +118,12 @@ def polygonize(
 def search(
     area: AreaArg,
     *,
-    year: SceneYear,
+    year: Year,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """The least cloudy scenes near the start and end of the growing season over AREA."""
+    """The least cloudy scenes near the start and end of AREA's growing season."""
     scenes = _find(parse_area(area), year, host, buffer_days, cloud_cover_max)
     output.emit([asdict(s) for s in scenes], title="Scenes")
 
@@ -135,13 +132,13 @@ def search(
 def download(
     area: AreaArg,
     *,
-    year: SceneYear,
-    out: Annotated[Path, Parameter(help="COG to write: RGBN of each scene, 10 m.")],
+    year: Year,
+    out: Annotated[Path, Parameter(help="COG to write: RGBN per scene, 10 m.")],
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Find the two scenes, then stack them over AREA into one COG."""
+    """Download the two scenes over AREA as one COG."""
     output.emit(
         _download(parse_area(area), year, out, host, buffer_days, cloud_cover_max)
     )
@@ -149,7 +146,7 @@ def download(
 
 @models.command(name="list")
 def list_models():
-    """The models, their licenses, and which is the default."""
+    """Models, their licenses, and which is the default."""
     output.emit(
         [
             {
@@ -165,6 +162,12 @@ def list_models():
     )
 
 
+def _fetch(model: registry.ModelName) -> None:
+    if not registry.cached(model):
+        with bar(f"Downloading {model}", unit="bytes") as progress:
+            registry.fetch(model, progress)
+
+
 def _detect_tiles(
     box: BBox,
     year: int,
@@ -176,10 +179,9 @@ def _detect_tiles(
     max_area: float | None,
 ) -> dict:
     require("inference")
-    from ftw_cli import detect as onnx
-    from ftw_cli import ftw2e, mosaics, quarterly
+    from ftw_cli import inference, mosaics, quarterly
 
-    con = ftw2e.connect()
+    con = vectors.connect()
     with spinner("Finding quarterly mosaic tiles"):
         parts = [
             p
@@ -188,11 +190,9 @@ def _detect_tiles(
         ]
     if not parts:
         raise LookupError(f"no quarterly mosaic tile overlaps {box}")
-    if not registry.cached(model):
-        with bar(f"Downloading {model}", unit="bytes") as progress:
-            registry.fetch(model, progress)
-    session = onnx.open_session(model)
-    # utm writes the whole output in one zone: the first tile's.
+    _fetch(model)
+    session = inference.open_session(model)
+    # utm writes the whole output in the first tile's zone.
     target = vectors.crs(crs, utm=parts[0].crs)
     for i, part in enumerate(parts, 1):
         label = f"{part.tile.key} ({i}/{len(parts)})"
@@ -207,7 +207,7 @@ def _detect_tiles(
                 mosaics.save(path, scores, part, model)
         inside = f"ST_Intersects(ST_Transform(geom, '{part.crs}', 'EPSG:4326'), {box.envelope()})"
         with spinner(f"Splitting fields on {label}"):
-            onnx.split_into(
+            inference.split_into(
                 con,
                 scores,
                 part.scores_transform,
@@ -218,11 +218,11 @@ def _detect_tiles(
                 max_area=max_area,
                 keep=f"{mosaics.owned(part)} and {inside}",
             )
-    meta = onnx.collection(model, f"Sentinel-2 quarterly mosaics {year}")
+    meta = inference.collection(model, f"Sentinel-2 quarterly mosaics {year}")
     meta["determination:datetime"] = f"{year}-01-01T00:00:00Z"
     count = vectors.write(con, "select * from fields", out, meta, crs=target)
-    tiles = [p.tile.key for p in parts]
     kept = {"rasters": str(keep)} if keep else {}
+    tiles = [p.tile.key for p in parts]
     return {
         "path": str(out),
         "fields": count,
@@ -259,13 +259,11 @@ def _predict(
     batch_size: int,
 ) -> dict:
     require("inference")
-    from ftw_cli import detect as onnx
+    from ftw_cli import inference
 
-    if not registry.cached(model):
-        with bar(f"Downloading {model}", unit="bytes") as progress:
-            registry.fetch(model, progress)
+    _fetch(model)
     with bar(f"Running {model}") as progress:
-        return onnx.predict(input, out, model, patch_size, batch_size, progress)
+        return inference.predict(input, out, model, patch_size, batch_size, progress)
 
 
 def _polygonize(
@@ -278,7 +276,7 @@ def _polygonize(
     area: BBox | None = None,
 ) -> dict:
     require("inference")
-    from ftw_cli import detect as onnx
+    from ftw_cli import inference
 
     with spinner("Splitting fields with BoundaryVote"):
-        return onnx.polygonize(input, out, simplify, min_area, max_area, crs, area)
+        return inference.polygonize(input, out, simplify, min_area, max_area, crs, area)

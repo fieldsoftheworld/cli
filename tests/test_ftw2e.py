@@ -4,33 +4,15 @@ import duckdb
 import pyarrow.parquet as pq
 import pytest
 
-from ftw_cli import ftw2e, output
+from ftw_cli import ftw2e, vectors
+from ftw_cli.areas import BBox
 
-IOWA = ftw2e.BBox(-93.70, 41.95, -93.60, 42.05)
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "-93.6,41.95,-93.7,42.05",  # xmin > xmax
-        "41.95,-93.7,42.05,-93.6",  # lat/lon swapped
-        "-93.7,41.95,-93.6",
-    ],
-)
-def test_bbox_rejects_malformed(text: str):
-    with pytest.raises(ValueError):
-        ftw2e.BBox.parse(text)
-
-
-def test_piped_output_is_json(capsys: pytest.CaptureFixture[str]):
-    output.configure(None)  # capsys stdout is not a TTY
-    output.emit([{"year": 2025, "fields": 394}])
-    assert json.loads(capsys.readouterr().out) == [{"year": 2025, "fields": 394}]
+IOWA = BBox(-93.70, 41.95, -93.60, 42.05)
 
 
 @pytest.mark.integration
 def test_query_reads_one_zone_file():
-    con = ftw2e.connect()
+    con = vectors.connect()
     summary = ftw2e.summarize(con, IOWA, 2025)
     assert summary["fields"] > 0
     fields = ftw2e.fields(con, IOWA, 2025, limit=5)
@@ -41,7 +23,7 @@ def test_query_reads_one_zone_file():
 @pytest.mark.integration
 def test_parquet_export_keeps_the_fiboa_collection(tmp_path):
     out = tmp_path / "iowa.parquet"
-    result = ftw2e.export(ftw2e.connect(), IOWA, [2025], out, limit=10)
+    result = ftw2e.export(vectors.connect(), IOWA, [2025], out, limit=10)
     assert result["fields"] == 10
     metadata = pq.read_schema(out).metadata
     assert json.loads(metadata[b"collection"])["collection"] == "ftw-s2-2025"
@@ -93,7 +75,7 @@ def test_collection_merges_years_and_moves_what_differs_to_columns():
 
 @pytest.mark.integration
 def test_multi_year_export_has_a_row_per_field_per_year(tmp_path):
-    con = ftw2e.connect()
+    con = vectors.connect()
     out = tmp_path / "iowa.parquet"
     result = ftw2e.export(con, IOWA, [2018, 2024], out, limit=None)
     table = pq.read_table(out, columns=["year", "collection"]).to_pylist()
@@ -119,8 +101,8 @@ def test_size_stats_on_known_areas(tmp_path):
         ) to '{path}'
         """
     )
-    box = ftw2e.BBox(-1, -1, 5, 5)
-    stats = ftw2e.size_stats(ftw2e.connect(), box, [str(path)])
+    box = BBox(-1, -1, 5, 5)
+    stats = ftw2e.size_stats(vectors.connect(), box, [str(path)])
 
     assert stats["median_ha"] == 26.0  # halfway between 2 and 50
     assert [stats[f"fields_{c}"] for c, *_ in ftw2e.SIZE_CLASSES] == [1, 1, 1, 1]
@@ -129,7 +111,7 @@ def test_size_stats_on_known_areas(tmp_path):
 
 @pytest.mark.integration
 def test_size_classes_add_up_to_the_summary():
-    summary = ftw2e.summarize(ftw2e.connect(), IOWA, 2024, stats=True)
+    summary = ftw2e.summarize(vectors.connect(), IOWA, 2024, stats=True)
     classes = [c for c, *_ in ftw2e.SIZE_CLASSES]
     assert sum(summary[f"fields_{c}"] for c in classes) == summary["fields"]
     assert sum(summary[f"area_{c}_ha"] for c in classes) == pytest.approx(

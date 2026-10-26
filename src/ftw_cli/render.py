@@ -5,7 +5,7 @@ from itertools import pairwise
 
 from PIL import Image, ImageDraw
 
-from ftw_cli.ftw2e import BBox
+from ftw_cli.areas import BBox
 
 BACKGROUND = (0, 56, 56)  # a shade darker than FTW Cyprus
 OUTLINE = (0, 71, 71)  # Cyprus
@@ -42,17 +42,11 @@ def render(fields: list[dict], bbox: BBox, width: int = 800) -> Image.Image:
     image = Image.new("RGB", (w, h), BACKGROUND)
     draw = ImageDraw.Draw(image)
     for field in fields:
-        geom = field["geometry"]
-        polygons = (
-            geom["coordinates"]
-            if geom["type"] == "MultiPolygon"
-            else [geom["coordinates"]]
-        )
+        exterior, *holes = field["geometry"]["coordinates"]
         fill = score_color(field.get("score"))
-        for exterior, *holes in polygons:
-            draw.polygon(to_px(exterior), fill=fill, outline=OUTLINE, width=SUPERSAMPLE)
-            for hole in holes:
-                draw.polygon(
-                    to_px(hole), fill=BACKGROUND, outline=OUTLINE, width=SUPERSAMPLE
-                )
+        draw.polygon(to_px(exterior), fill=fill, outline=OUTLINE, width=SUPERSAMPLE)
+        for hole in holes:
+            draw.polygon(
+                to_px(hole), fill=BACKGROUND, outline=OUTLINE, width=SUPERSAMPLE
+            )
     return image.resize((w // SUPERSAMPLE, h // SUPERSAMPLE), Image.Resampling.LANCZOS)

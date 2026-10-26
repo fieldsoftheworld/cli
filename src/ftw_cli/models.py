@@ -4,10 +4,11 @@ import hashlib
 import os
 import tempfile
 import urllib.request
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from ftw_cli.progress import Progress
 
 PRUE_CCBY = "https://huggingface.co/fieldsoftheworld/ftw-prue-ccby/resolve/ffe4452768e1054b1d7c2ab39b84b4170f90c7cf/"
 FTW_Q = "https://huggingface.co/fieldsoftheworld/ftw-q/resolve/f5aecca0ecd789ccdaf4a9844e2ed0a600a358ee/"
@@ -70,9 +71,7 @@ def cached(name: ModelName) -> Path | None:
     return path if path.exists() else None
 
 
-def fetch(
-    name: ModelName, progress: Callable[[int, int | None], None] | None = None
-) -> Path:
+def fetch(name: ModelName, progress: Progress | None = None) -> Path:
     """Local path to model ``name``, downloading and verifying it on first use."""
     path = _path(name)
     if path.exists():

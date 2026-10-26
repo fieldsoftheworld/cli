@@ -29,19 +29,12 @@ def add(
     ``{raster}_b{n}``. ``count`` is the number of pixels, weighted by coverage.
     """
     vectors.check(out)
-    con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true")
-    parquet = fields.suffix.lower() == ".parquet"
-    # ST_Read names the geometry column "geom" and may return GDAL's own "fid", which a
-    # GeoPackage writer refuses to take back; the fiboa writer adds its own bbox. A
-    # multi-part field is measured as the one Polygon it is written as.
-    geometry = vectors.polygon("geometry" if parquet else "geom")
+    con = vectors.connect()
+    # A multi-part field is measured as the one Polygon it is written as.
     con.execute(
         "create table fields as select *, row_number() over () - 1 as _row from ("
-        "select columns(lambda c: c not in ('bbox', 'geom', 'geometry', 'fid')), "
-        f"{geometry} as geometry from {'read_parquet' if parquet else 'ST_Read'}(?)"
-        ") where geometry is not null",
-        [str(fields)],
+        f"select * replace ({vectors.polygon()} as geometry) from {vectors.source(fields)}"
+        ") where geometry is not null"
     )
     [(crs,)] = con.execute("select any_value(ST_CRS(geometry)) from fields").fetchall()
     crs = "EPSG:4326" if crs in (None, "OGC:CRS84") else crs
@@ -55,7 +48,9 @@ def add(
             f"left join stats_{i} using (_row)"
         )
         taken |= set(table.column_names)
-    meta = _collection(con, fields)
+    parquet = fields.suffix.lower() == ".parquet"
+    meta = fiboa.read_collection(con, str(fields)) if parquet else None
+    meta = meta or fiboa.collection("ftw-cli")
     custom = meta.setdefault("schemas:custom", {"$schema": fiboa.SDL, "properties": {}})
     for column in sorted(taken - original):
         custom["properties"][column] = {
@@ -120,15 +115,3 @@ def _name(ds: rasterio.DatasetReader, path: Path, band: int, taken: set[str]) ->
 
 def _safe(text: str) -> str:
     return re.sub(r"\W+", "_", text).strip("_")
-
-
-def _collection(con: duckdb.DuckDBPyConnection, fields: Path) -> dict:
-    """The input's fiboa collection metadata if it has one; otherwise a new collection."""
-    if fields.suffix.lower() == ".parquet":
-        rows = con.execute(
-            "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
-            [str(fields)],
-        ).fetchall()
-        if rows:
-            return json.loads(rows[0][0])
-    return fiboa.collection("ftw-cli")
