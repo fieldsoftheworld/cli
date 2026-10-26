@@ -20,6 +20,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | How large the fields are (smallholder or industrial) | `ftw data query AREA --stats` |
 | The fields themselves, for one or several years (with a `year` column) | `ftw data query AREA --year Y --out fields.parquet` |
 | How the fields changed over the years | `ftw data query AREA --year all` |
+| Which fields were kept, split, merged, new, or lost between two years | `ftw data diff AREA --from Y1 --to Y2` |
 | Fields in imagery from any year, including ones the 2nd Edition lacks | `ftw detect AREA --year Y --out fields.gpkg` |
 | A picture of the fields | `ftw view AREA --out map.png` |
 | How well one set of fields reproduces another (precision, recall, IoU) | `ftw compare REFERENCE PREDICTION` |

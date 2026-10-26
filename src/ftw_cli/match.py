@@ -168,3 +168,86 @@ def write_prediction(con: duckdb.DuckDBPyConnection, out: Path) -> int:
         from b left join matches m on m.br = b.rid left join a on a.rid = m.ar
     """
     return vectors.write(con, query, out, fiboa.collection("ftw-cli-compare"))
+
+
+CHANGES = ("kept", "changed", "split", "merged", "new", "lost")
+
+
+@dataclass(frozen=True)
+class Change:
+    """One change class: its fields in the earlier and later year, and their area."""
+
+    change: str
+    fields_from: int
+    fields_to: int
+    area_from_ha: float
+    area_to_ha: float
+
+
+def changes(con: duckdb.DuckDBPyConnection, iou: float = 0.5) -> list[Change]:
+    """Label every field of ``a`` (the earlier year) and ``b`` (the later one).
+
+    ``kept`` fields match one to one. ``split`` is a field of ``a`` holding two or more
+    fields of ``b``, and those fields; ``merged`` the reverse. ``lost`` and ``new`` fields
+    overlap nothing in the other year, and ``changed`` fields overlap but are none of
+    these. The labels go to ``a_change`` and ``b_change``, so each year's counts add up.
+    """
+    pairs(con, iou)
+    con.execute(
+        f"""
+        create or replace temp table split_a as
+        select ar from pairs where b_inside >= {CONTAINED} group by ar having count(*) > 1;
+        create or replace temp table merge_b as
+        select br from pairs where a_inside >= {CONTAINED} group by br having count(*) > 1;
+        create or replace temp table a_change as
+        select rid, area, case
+            when rid in (select ar from matches) then 'kept'
+            when rid in (select ar from split_a) then 'split'
+            when rid in (select ar from pairs join merge_b using (br) where a_inside >= {CONTAINED})
+                then 'merged'
+            when rid not in (select ar from pairs) then 'lost'
+            else 'changed' end as change
+        from a;
+        create or replace temp table b_change as
+        select rid, area, case
+            when rid in (select br from matches) then 'kept'
+            when rid in (select br from merge_b) then 'merged'
+            when rid in (select br from pairs join split_a using (ar) where b_inside >= {CONTAINED})
+                then 'split'
+            when rid not in (select br from pairs) then 'new'
+            else 'changed' end as change
+        from b;
+        """
+    )
+    rows = con.execute(
+        """
+        select change,
+               count(*) filter (where side = 'a'), count(*) filter (where side = 'b'),
+               coalesce(sum(area) filter (where side = 'a'), 0) / 1e4,
+               coalesce(sum(area) filter (where side = 'b'), 0) / 1e4
+        from (select 'a' as side, change, area from a_change
+              union all select 'b', change, area from b_change)
+        group by change
+        """
+    ).fetchall()
+    found = {name: counts for name, *counts in rows}
+    return [
+        Change(name, n_from, n_to, round(area_from, 1), round(area_to, 1))
+        for name in CHANGES
+        for n_from, n_to, area_from, area_to in [found.get(name, (0, 0, 0.0, 0.0))]
+    ]
+
+
+def write_changes(
+    con: duckdb.DuckDBPyConnection, out: Path, start: int, end: int
+) -> int:
+    """The later year's fields and the earlier year's lost ones, with ``year`` and ``change``."""
+    query = f"""
+        select b.id, {int(end)} as year, c.change, ST_Transform(b.geom, 'EPSG:4326') as geometry,
+               b.area::float as "metrics:area"
+        from b join b_change c using (rid)
+        union all
+        select a.id, {int(start)}, c.change, ST_Transform(a.geom, 'EPSG:4326'), a.area::float
+        from a join a_change c using (rid) where c.change = 'lost'
+    """
+    return vectors.write(con, query, out, fiboa.collection("ftw-cli-diff"))
