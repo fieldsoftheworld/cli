@@ -9,11 +9,11 @@ Field boundaries for any place on Earth, from your terminal. `ftw` queries the [
 ## Install
 
 ```sh
-uv tool install 'ftw-cli[inference,tui] @ git+https://github.com/fieldsoftheworld/cli'
+uv tool install 'ftw-cli[inference] @ git+https://github.com/fieldsoftheworld/cli'
 ftw --install-completion
 ```
 
-The base install queries, exports, and draws the 2nd Edition. The `imagery` extra adds Sentinel-2 download, `inference` adds the models, and `tui` adds the interactive browser.
+The base install queries, exports, and draws the 2nd Edition. The `imagery` extra adds Sentinel-2 download, and `inference` adds the models.
 
 ## Use
 
@@ -49,14 +49,6 @@ ftw infer polygonize scores.tif --out fields.parquet
 ```
 
 `ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The polygons are GeoParquet in EPSG:4326 with the same columns as the 2nd Edition.
-
-## Browse
-
-```sh
-ftw tui
-```
-
-The TUI shows the fields of an area on a map colored by model score, with a summary and a table of the largest fields. `r` queries, `e` exports to GeoParquet, and `q` quits. The map is a full-resolution image in terminals with the kitty or sixel graphics protocols (kitty, WezTerm, iTerm2, recent Windows Terminal) and colored blocks elsewhere, including over SSH.
 
 ## For scripts and agents
 

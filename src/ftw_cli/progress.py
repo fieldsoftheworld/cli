@@ -1,7 +1,7 @@
 """Progress bars on stderr for people at a terminal, and nothing for pipes and agents.
 
 Library functions take an optional ``progress(done, total)`` callback and know nothing
-about drawing; the CLI passes one from ``bar`` and the TUI passes its own.
+about drawing; the CLI passes one from ``bar``, and other callers can pass their own.
 """
 
 from collections.abc import Callable, Iterator
