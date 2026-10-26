@@ -8,7 +8,9 @@ from cyclopts import App, Parameter, validators
 
 from ftw_cli import models as registry
 from ftw_cli import output
-from ftw_cli.cli_args import BBoxArg, fail, need, parse_bbox
+from ftw_cli.cli_args import AreaArg, fail, need, parse_area
+from ftw_cli.ftw2e import BBox
+from ftw_cli.progress import bar, spinner
 
 imagery = App(
     name="imagery",
@@ -38,21 +40,24 @@ CloudMax = Annotated[float, Parameter(help="Maximum scene cloud cover, in percen
 
 @imagery.command
 def search(
+    area: AreaArg,
     *,
-    bbox: BBoxArg,
     year: SceneYear,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """The least cloudy scenes near the start and end of the growing season over BBOX."""
-    output.emit(_search(bbox, year, host, buffer_days, cloud_cover_max), title="Scenes")
+    """The least cloudy scenes near the start and end of the growing season over AREA."""
+    output.emit(
+        _search(parse_area(area), year, host, buffer_days, cloud_cover_max),
+        title="Scenes",
+    )
 
 
 @imagery.command
 def download(
+    area: AreaArg,
     *,
-    bbox: BBoxArg,
     year: SceneYear,
     out: Annotated[
         Path, Parameter(help="GeoTIFF to write: 8 bands, RGBN of each scene, 10 m.")
@@ -61,8 +66,10 @@ def download(
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Search for the two scenes, then stack them over BBOX into one GeoTIFF."""
-    output.emit(_download(bbox, year, out, host, buffer_days, cloud_cover_max))
+    """Search for the two scenes, then stack them over AREA into one GeoTIFF."""
+    output.emit(
+        _download(parse_area(area), year, out, host, buffer_days, cloud_cover_max)
+    )
 
 
 @models.command(name="list")
@@ -85,13 +92,12 @@ def list_models():
 @models.command
 def show(name: ModelName):
     """Everything about one model, including its pinned download URL."""
-    model = registry.MODELS[name]
-    cached = registry.cache_dir() / model.url.rsplit("/", 1)[-1]
+    cached = registry.cached(name)
     output.emit(
         {
             "name": name,
-            **asdict(model),
-            "cached": str(cached) if cached.exists() else None,
+            **asdict(registry.MODELS[name]),
+            "cached": str(cached) if cached else None,
         }
     )
 
@@ -148,8 +154,8 @@ def polygonize(
 
 @infer.command(name="all")
 def run_all(
+    area: AreaArg,
     *,
-    bbox: BBoxArg,
     year: SceneYear,
     out_dir: Annotated[
         Path,
@@ -160,10 +166,11 @@ def run_all(
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Download imagery for BBOX, run MODEL on it, and polygonize the fields."""
+    """Download imagery for AREA, run MODEL on it, and polygonize the fields."""
+    box = parse_area(area)
     out_dir.mkdir(parents=True, exist_ok=True)
     scenes = _download(
-        bbox, year, out_dir / "imagery.tif", host, buffer_days, cloud_cover_max
+        box, year, out_dir / "imagery.tif", host, buffer_days, cloud_cover_max
     )
     scores = _run(out_dir / "imagery.tif", out_dir / "scores.tif", model, None, 4)
     fields = _polygonize(
@@ -176,38 +183,39 @@ def run_all(
 
 
 def _search(
-    bbox: str, year: int, host: str, buffer_days: int, cloud_cover_max: float
+    box: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float
 ) -> list[dict]:
     try:
         from ftw_cli import imagery as s2
     except ImportError as e:
         need("imagery", e)
-    box = parse_bbox(bbox)
     try:
-        start, end = s2.season(box, year)
-        return [
-            {
-                "window": window,
-                "target_date": str(when),
-                **asdict(s2.search(box, when, host, buffer_days, cloud_cover_max)),
-            }
-            for window, when in (("a", start), ("b", end))
-        ]
+        with spinner("Finding scenes on the crop calendar"):
+            start, end = s2.season(box, year)
+            return [
+                {
+                    "window": window,
+                    "target_date": str(when),
+                    **asdict(s2.search(box, when, host, buffer_days, cloud_cover_max)),
+                }
+                for window, when in (("a", start), ("b", end))
+            ]
     except (LookupError, ValueError, OSError) as e:
         fail(str(e))
 
 
 def _download(
-    bbox: str, year: int, out: Path, host: str, buffer_days: int, cloud_cover_max: float
+    box: BBox, year: int, out: Path, host: str, buffer_days: int, cloud_cover_max: float
 ) -> dict:
     from ftw_cli import imagery as s2
 
-    found = _search(bbox, year, host, buffer_days, cloud_cover_max)
+    found = _search(box, year, host, buffer_days, cloud_cover_max)
     scenes = [
         s2.Scene(**{k: v for k, v in s.items() if k in s2.Scene.__dataclass_fields__})
         for s in found
     ]
-    return s2.download(scenes, parse_bbox(bbox), out, host)
+    with bar("Reading Sentinel-2 bands") as progress:
+        return s2.download(scenes, box, out, host, progress)
 
 
 def _run(
@@ -218,7 +226,11 @@ def _run(
     except ImportError as e:
         need("inference", e)
     try:
-        return onnx.run(input, out, model, patch_size, batch_size)
+        if not registry.cached(model):
+            with bar(f"Downloading {model}", unit="bytes") as progress:
+                registry.fetch(model, progress)
+        with bar(f"Running {model}") as progress:
+            return onnx.run(input, out, model, patch_size, batch_size, progress)
     except (ValueError, OSError) as e:
         fail(str(e))
 
@@ -231,6 +243,7 @@ def _polygonize(
     except ImportError as e:
         need("inference", e)
     try:
-        return onnx.polygonize(input, out, simplify, min_size, max_size)
+        with spinner("Splitting fields with BoundaryVote"):
+            return onnx.polygonize(input, out, simplify, min_size, max_size)
     except (ValueError, OSError) as e:
         fail(str(e))

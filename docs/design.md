@@ -7,7 +7,8 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 - Every feature is a plain function in `ftw_cli` that returns data. The command line and the TUI both call those functions.
 - Data is read where it lives. DuckDB reads the 2nd Edition's small file index, then only the row groups that overlap the request. A 10 km box in Iowa reads one 2.3 GB file in about 3 seconds.
 - Output is a table in a terminal and JSON when piped or with `--json`. Errors go to stderr with a non-zero exit, and nothing prompts without a terminal.
-- Commands are noun-verb like GDAL's (`ftw data query`, `ftw infer run`), take `--bbox xmin,ymin,xmax,ymax`, and pick the output format from the file suffix.
+- Commands are noun-verb like GDAL's (`ftw data query`, `ftw infer run`), take an area as a place name or `xmin,ymin,xmax,ymax` (also as `--bbox` or `--place`), and pick the output format from the file suffix. Place names go through Nominatim with a User-Agent and a local cache, as its usage policy asks.
+- Progress bars go to stderr, only in a terminal. Library functions take an optional `progress(done, total)` callback and draw nothing themselves, so the TUI can show progress its own way.
 
 ## Install
 
@@ -23,11 +24,12 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 Working now:
 
 - `ftw data info`: per-year totals for the 2nd Edition.
-- `ftw data files --bbox`: the files a query would read, and their sizes.
-- `ftw data query --bbox [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
-- `ftw view --bbox --out map.png`: the fields drawn to a PNG, colored by score.
+- `ftw data files AREA`: the files a query would read, and their sizes.
+- `ftw data query AREA [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
+- `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
+- `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
-- `ftw imagery search|download --bbox --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
+- `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
 - `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:

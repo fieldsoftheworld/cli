@@ -2,6 +2,7 @@
 
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 import duckdb
@@ -23,6 +24,7 @@ def run(
     model: str = models.DEFAULT_MODEL,
     patch_size: int | None = None,
     batch_size: int = 4,
+    progress: Callable[[int, int | None], None] | None = None,
 ) -> dict:
     """Write field and boundary probabilities for ``input`` to ``out`` as a 2-band uint8 GeoTIFF."""
     import onnxruntime as ort
@@ -72,6 +74,8 @@ def run(
             predictions = np.rint(probs * 255).astype(np.uint8)
             for w, pred in zip(batch, predictions, strict=True):
                 _paste(scores, pred, w, pad)
+            if progress:
+                progress(i + len(batch), len(windows))
         profile = src.profile | {
             "count": 2,
             "dtype": "uint8",
