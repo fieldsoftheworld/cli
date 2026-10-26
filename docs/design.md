@@ -28,14 +28,13 @@ Working now:
 - `ftw view --bbox --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
 - `ftw imagery search|download --bbox --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
-- `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize).
+- `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:
 
 - `ftw catalog list|query`: the harmonized field data on Source Coop, 69 national collections with crop types.
 - `ftw join catalog --fields f.parquet --collection nl`: match fields to harmonized parcels by IoU and carry their attributes over.
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
-- Polygonization that splits touching fields. `infer polygonize` takes connected regions of the field class, like ftw-baselines, so fields merge wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 - ftw-q (quarterly mosaics) and FTP (PlanetScope), which need their own imagery commands.
 - `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
 - TUI: imagery and inference screens as those commands land.
@@ -47,7 +46,7 @@ The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variant
 
 ### Parity with ftw-baselines
 
-`ftw infer run` matches `ftw-tools inference run` with the same checkpoint: on an Iowa scene, 11 of 936k pixels differ, from ONNX and PyTorch floating point ties. That needed two details from the torch pipeline. Patches follow torchgeo's `GriddedPatchSampler` grid, centered on the image (a grid anchored at the corner changes 5.6% of pixels, since the models depend on patch context), and the 2x upsampling is bilinear with aligned corners, matching kornia's `Resize`. Scene selection picks the same scenes, and `infer polygonize` produces the same fields (area IoU 0.9999).
+The ONNX models in `ftw infer run` match `ftw-tools inference run` with the same checkpoint: on an Iowa scene, the predicted class differs on 11 of 936k pixels, from ONNX and PyTorch floating point ties. That needed two details from the torch pipeline. Patches follow torchgeo's `GriddedPatchSampler` grid, centered on the image (a grid anchored at the corner changes 5.6% of pixels, since the models depend on patch context), and the 2x upsampling is bilinear with aligned corners, matching kornia's `Resize`. Scene selection picks the same scenes. `infer polygonize` differs from ftw-baselines by design, since it splits fields with BoundaryVote instead of taking connected regions.
 
 ## Data
 

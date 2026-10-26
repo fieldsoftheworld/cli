@@ -32,6 +32,7 @@ optional-dependencies.imagery = [
 ]
 optional-dependencies.inference = [
   "ftw-cli[imagery]",
+  "ftw-fbp[fast]>=0.1",
   "onnxruntime>=1.20",
 ]
 optional-dependencies.tui = [

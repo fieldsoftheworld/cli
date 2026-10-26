@@ -107,7 +107,8 @@ def run(
     ],
     *,
     out: Annotated[
-        Path, Parameter(help="GeoTIFF of classes: 0 background, 1 field, 2 boundary.")
+        Path,
+        Parameter(help="GeoTIFF of field and boundary probabilities (uint8, p * 255)."),
     ],
     model: ModelName = registry.DEFAULT_MODEL,
     patch_size: Annotated[
@@ -116,7 +117,7 @@ def run(
     ] = None,
     batch_size: Annotated[int, Parameter(help="Patches per model call.")] = 4,
 ):
-    """Classify every pixel of INPUT as background, field, or field boundary."""
+    """Predict field and field-boundary probabilities for every pixel of INPUT."""
     output.emit(_run(input, out, model, patch_size, batch_size))
 
 
@@ -126,7 +127,7 @@ def polygonize(
         Path,
         Parameter(
             validator=validators.Path(exists=True, dir_okay=False),
-            help="Classes GeoTIFF from `ftw infer run`.",
+            help="Probabilities GeoTIFF from `ftw infer run`.",
         ),
     ],
     *,
@@ -141,7 +142,7 @@ def polygonize(
         float | None, Parameter(help="Drop fields larger than this, in m².")
     ] = None,
 ):
-    """Turn the field class of INPUT into polygons with area and perimeter."""
+    """Split INPUT into fields with BoundaryVote (fbp.FTW_2E) and write polygons."""
     output.emit(_polygonize(input, out, simplify, min_size, max_size))
 
 
@@ -152,7 +153,7 @@ def run_all(
     year: SceneYear,
     out_dir: Annotated[
         Path,
-        Parameter(help="Directory for imagery.tif, classes.tif, and fields.parquet."),
+        Parameter(help="Directory for imagery.tif, scores.tif, and fields.parquet."),
     ],
     model: ModelName = registry.DEFAULT_MODEL,
     host: Host = "mspc",
@@ -164,12 +165,12 @@ def run_all(
     scenes = _download(
         bbox, year, out_dir / "imagery.tif", host, buffer_days, cloud_cover_max
     )
-    classes = _run(out_dir / "imagery.tif", out_dir / "classes.tif", model, None, 4)
+    scores = _run(out_dir / "imagery.tif", out_dir / "scores.tif", model, None, 4)
     fields = _polygonize(
-        out_dir / "classes.tif", out_dir / "fields.parquet", 15, 500, None
+        out_dir / "scores.tif", out_dir / "fields.parquet", 15, 500, None
     )
     output.emit(
-        {"scenes": scenes["scenes"], "model": model, **classes, **fields}
+        {"scenes": scenes["scenes"], "model": model, **scores, **fields}
         | {"path": str(out_dir)}
     )
 

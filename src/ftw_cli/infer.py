@@ -7,12 +7,14 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import rasterio
+from fbp import FTW_2E, run_windowed
 from rasterio.features import shapes
 from rasterio.windows import Window
 
 from ftw_cli import models
 
-FIELD = 1  # classes: 0 background, 1 field, 2 boundary
+# Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
+BANDS = ("field", "boundary")
 
 
 def run(
@@ -22,7 +24,7 @@ def run(
     patch_size: int | None = None,
     batch_size: int = 4,
 ) -> dict:
-    """Write per-pixel classes for ``input`` to ``out`` as a single-band uint8 GeoTIFF."""
+    """Write field and boundary probabilities for ``input`` to ``out`` as a 2-band uint8 GeoTIFF."""
     import onnxruntime as ort
 
     spec = models.MODELS[model]
@@ -55,7 +57,7 @@ def run(
             for row in _starts(height, size, stride)
             for col in _starts(width, size, stride)
         ]
-        classes = np.zeros((height, width), dtype=np.uint8)
+        scores = np.zeros((2, height, width), dtype=np.uint8)
         for i in range(0, len(windows), batch_size):
             batch = windows[i : i + batch_size]
             images = np.stack(
@@ -64,13 +66,14 @@ def run(
                     for w in batch
                 ]
             )
-            logits = session.run(None, {input_name: images})[0]
+            logits = np.asarray(session.run(None, {input_name: images})[0])
             f = spec.resize_factor
-            predictions = logits.argmax(axis=1)[:, ::f, ::f].astype(np.uint8)
+            probs = _softmax(logits[:, :, ::f, ::f])[:, 1:]
+            predictions = np.rint(probs * 255).astype(np.uint8)
             for w, pred in zip(batch, predictions, strict=True):
-                _paste(classes, pred, w, pad)
+                _paste(scores, pred, w, pad)
         profile = src.profile | {
-            "count": 1,
+            "count": 2,
             "dtype": "uint8",
             "nodata": None,
             "compress": "deflate",
@@ -78,12 +81,16 @@ def run(
         tags = src.tags()
 
     with rasterio.open(out, "w", **profile) as dst:
-        dst.write(classes, 1)
+        dst.write(scores)
+        dst.descriptions = BANDS
         dst.update_tags(**{k: v for k, v in tags.items() if k == "TIFFTAG_DATETIME"})
+    field, boundary = scores.astype(np.int16)
     return {
         "path": str(out),
         "model": model,
-        "field_fraction": round(float((classes == FIELD).mean()), 3),
+        "field_fraction": round(
+            float(((field > boundary) & (2 * field + boundary > 255)).mean()), 3
+        ),
         "patches": len(windows),
     }
 
@@ -95,22 +102,39 @@ def polygonize(
     min_size: float = 500.0,
     max_size: float | None = None,
 ) -> dict:
-    """Polygonize the field class of a ``run`` output into GeoParquet in EPSG:4326.
+    """Split a ``run`` output into fields with BoundaryVote and write GeoParquet in EPSG:4326.
 
-    ``simplify`` is a tolerance in meters, ``min_size`` and ``max_size`` are areas in m².
+    Fields come from ``fbp.FTW_2E``, the setting of the FTW 2nd Edition, so touching fields
+    stay separate where the predicted boundary divides them. ``simplify`` is a tolerance in
+    meters, ``min_size`` and ``max_size`` are areas in m².
     """
     with rasterio.open(input) as src:
         if not src.crs.is_projected:
             raise ValueError(
                 f"{input} must be in a projected CRS (meters), not {src.crs}"
             )
-        classes = src.read(1)
+        if src.count != 2:
+            raise ValueError(
+                f"{input} has {src.count} bands; expected field and boundary "
+                "probabilities from `ftw infer run`"
+            )
+        field, boundary = src.read().astype(np.float32) / 255
         crs = src.crs.to_string()
         stamp = src.tags().get("TIFFTAG_DATETIME")
-        geoms = [
-            json.dumps(g)
-            for g, _ in shapes(classes, mask=classes == FIELD, transform=src.transform)
-        ]
+        transform = src.transform
+    prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
+    del field, boundary
+    instances = run_windowed(
+        FTW_2E,
+        prob.argmax(0).astype(np.uint8),
+        prob,
+        pixel_area_m2=abs(transform.a * transform.e),
+    )
+    del prob
+    geoms = [
+        json.dumps(g)
+        for g, _ in shapes(instances, mask=instances > 0, transform=transform)
+    ]
 
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
@@ -149,6 +173,12 @@ def _prepare(pixels: np.ndarray, spec: models.Model) -> np.ndarray:
     return image if spec.resize_factor == 1 else _upsample(image, spec.resize_factor)
 
 
+def _softmax(logits: np.ndarray) -> np.ndarray:
+    """Class probabilities from ``(batch, class, h, w)`` logits."""
+    e = np.exp(logits - logits.max(axis=1, keepdims=True))
+    return e / e.sum(axis=1, keepdims=True)
+
+
 def _upsample(image: np.ndarray, factor: int) -> np.ndarray:
     """Bilinear upsampling with aligned corners, matching kornia's ``Resize`` used in training."""
 
@@ -162,12 +192,12 @@ def _upsample(image: np.ndarray, factor: int) -> np.ndarray:
     return rows[:, :, c0] * (1 - ct) + rows[:, :, c0 + 1] * ct
 
 
-def _paste(classes: np.ndarray, pred: np.ndarray, w: Window, pad: int) -> None:
-    """Copy ``pred`` into ``classes``, dropping ``pad`` pixels on sides not at the image edge.
+def _paste(scores: np.ndarray, pred: np.ndarray, w: Window, pad: int) -> None:
+    """Copy ``pred`` into ``scores``, dropping ``pad`` pixels on sides not at the image edge.
 
     Patches can hang past the image; their outside part is clipped.
     """
-    height, width = classes.shape
+    height, width = scores.shape[-2:]
     top, left = int(w.row_off), int(w.col_off)
     bottom, right = top + w.height, left + w.width
     pad_top = 0 if top <= 0 else pad
@@ -180,7 +210,8 @@ def _paste(classes: np.ndarray, pred: np.ndarray, w: Window, pad: int) -> None:
     if dst_bottom <= dst_top or dst_right <= dst_left:
         return
     src_top, src_left = pad_top + dst_top - inner_top, pad_left + dst_left - inner_left
-    classes[dst_top:dst_bottom, dst_left:dst_right] = pred[
+    scores[..., dst_top:dst_bottom, dst_left:dst_right] = pred[
+        ...,
         src_top : src_top + dst_bottom - dst_top,
         src_left : src_left + dst_right - dst_left,
     ]
