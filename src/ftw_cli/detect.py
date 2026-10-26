@@ -14,6 +14,7 @@ from rasterio.features import shapes
 from rasterio.windows import Window
 
 from ftw_cli import __version__, cog, fiboa, models, vectors
+from ftw_cli.filters import Filters
 from ftw_cli.ftw2e import BBox
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
@@ -95,14 +96,14 @@ def polygonize(
     input: Path,
     out: Path,
     simplify: float = 15.0,
-    min_size: float = 500.0,
-    max_size: float | None = None,
+    min_area: float | None = 500.0,
+    max_area: float | None = None,
     crs: str = "4326",
     area: BBox | None = None,
 ) -> dict:
     """Split ``predict``'s probabilities into fields with ``fbp.FTW_2E`` and write them to ``out``.
 
-    ``simplify`` is a tolerance in meters; ``min_size`` and ``max_size`` are areas in m².
+    ``simplify`` is a tolerance in meters; ``min_area`` and ``max_area`` are in m².
     ``crs`` is an EPSG code, or ``utm`` for the raster's own CRS. With an ``area`` that has a
     polygon, only fields that intersect it are kept.
     """
@@ -135,8 +136,8 @@ def polygonize(
         target,
         input.stem,
         simplify,
-        min_size,
-        max_size,
+        min_area,
+        max_area,
         keep=inside,
     )
     meta = collection(tags.get("FTW_MODEL", "an FTW model"), "Sentinel-2")
@@ -166,8 +167,8 @@ def split_into(
     target: str,
     prefix: str,
     simplify: float = 15.0,
-    min_size: float = 500.0,
-    max_size: float | None = None,
+    min_area: float | None = 500.0,
+    max_area: float | None = None,
     keep: str = "true",
 ) -> None:
     """Split uint8 field and boundary ``scores`` with ``fbp.FTW_2E`` into table ``fields``.
@@ -196,7 +197,6 @@ def split_into(
         'create table if not exists fields (id varchar, geometry geometry, "metrics:area" float, '
         '"metrics:perimeter" float)'
     )
-    max_sql = f"and area <= {float(max_size)}" if max_size else ""
     con.execute(
         f"""
         insert into fields
@@ -204,7 +204,7 @@ def split_into(
                ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}'),
                area::float, ST_Perimeter(geom)::float
         from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
-        where area >= {float(min_size)} {max_sql} and {keep}
+        where {Filters(min_area, max_area).sql(area="area")} and {keep}
         """
     )
 

@@ -9,7 +9,7 @@ from cyclopts import App, Parameter, validators
 
 from ftw_cli import models as registry
 from ftw_cli import output, vectors
-from ftw_cli.cli_args import AreaArg, CrsArg, parse_area, require
+from ftw_cli.cli_args import AreaArg, CrsArg, MaxArea, MinArea, parse_area, require
 from ftw_cli.ftw2e import BBox
 from ftw_cli.progress import bar, spinner
 
@@ -48,7 +48,6 @@ FieldsOut = Annotated[
     Path, Parameter(help="Fields to write: .parquet (fiboa), .gpkg, .geojson, or .fgb.")
 ]
 Simplify = Annotated[float, Parameter(help="Simplification tolerance in meters.")]
-MinSize = Annotated[float, Parameter(help="Drop smaller fields, in m².")]
 
 
 def detect(
@@ -57,6 +56,8 @@ def detect(
     year: SceneYear,
     out: FieldsOut,
     crs: CrsArg = "4326",
+    min_area: MinArea = 500,
+    max_area: MaxArea = None,
     model: ModelName = registry.DEFAULT_MODEL,
     keep: Annotated[
         Path | None,
@@ -78,7 +79,7 @@ def detect(
         vectors.crs(crs, utm="")
     box = parse_area(area)
     if registry.MODELS[model].imagery == "mosaics":
-        output.emit(_detect_tiles(box, year, out, model, crs, keep))
+        output.emit(_detect_tiles(box, year, out, model, crs, keep, min_area, max_area))
         return
     with tempfile.TemporaryDirectory() as tmp:
         work = keep or Path(tmp)
@@ -86,7 +87,7 @@ def detect(
             box, year, work / "imagery.tif", host, buffer_days, cloud_cover_max
         )
         _predict(work / "imagery.tif", work / "scores.tif", model, None, 4)
-        fields = _polygonize(work / "scores.tif", out, 15, 500, None, crs, box)
+        fields = _polygonize(work / "scores.tif", out, 15, min_area, max_area, crs, box)
     kept = {"rasters": str(keep)} if keep else {}
     output.emit({**fields, "model": model, "scenes": scenes["scenes"], **kept})
 
@@ -109,13 +110,11 @@ def polygonize(
     out: FieldsOut,
     crs: CrsArg = "4326",
     simplify: Simplify = 15,
-    min_size: MinSize = 500,
-    max_size: Annotated[
-        float | None, Parameter(help="Drop larger fields, in m².")
-    ] = None,
+    min_area: MinArea = 500,
+    max_area: MaxArea = None,
 ):
     """Split INPUT into fields with BoundaryVote."""
-    output.emit(_polygonize(input, out, simplify, min_size, max_size, crs))
+    output.emit(_polygonize(input, out, simplify, min_area, max_area, crs))
 
 
 @imagery.command
@@ -173,6 +172,8 @@ def _detect_tiles(
     model: registry.ModelName,
     crs: str,
     keep: Path | None,
+    min_area: float | None,
+    max_area: float | None,
 ) -> dict:
     require("inference")
     from ftw_cli import detect as onnx
@@ -213,6 +214,8 @@ def _detect_tiles(
                 part.crs,
                 target,
                 part.tile.key,
+                min_area=min_area,
+                max_area=max_area,
                 keep=f"{mosaics.owned(part)} and {inside}",
             )
     meta = onnx.collection(model, f"Sentinel-2 quarterly mosaics {year}")
@@ -269,8 +272,8 @@ def _polygonize(
     input: Path,
     out: Path,
     simplify: float,
-    min_size: float,
-    max_size: float | None,
+    min_area: float | None,
+    max_area: float | None,
     crs: str,
     area: BBox | None = None,
 ) -> dict:
@@ -278,4 +281,4 @@ def _polygonize(
     from ftw_cli import detect as onnx
 
     with spinner("Splitting fields with BoundaryVote"):
-        return onnx.polygonize(input, out, simplify, min_size, max_size, crs, area)
+        return onnx.polygonize(input, out, simplify, min_area, max_area, crs, area)

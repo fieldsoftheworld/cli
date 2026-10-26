@@ -12,6 +12,7 @@ from typing import Any
 import duckdb
 
 from ftw_cli import vectors
+from ftw_cli.filters import NO_FILTERS, Filters
 
 BASE_URL = "https://data.source.coop/ftw/global-data-2e"
 VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
@@ -110,14 +111,16 @@ def hrefs(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[str]:
     return [h for (h,) in con.execute(query, [year]).fetchall()]
 
 
-def summarize(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> dict:
+def summarize(
+    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, filters: Filters = NO_FILTERS
+) -> dict:
     files = hrefs(con, bbox, year)
     row = (0, 0, None)
     if files:
         row = con.execute(
             f"""
             select count(*), round(sum("metrics:area") / 1e4, 1), round(avg(score), 1)
-            from read_parquet(?) where {_in_bbox(bbox)}
+            from read_parquet(?) where {_in_bbox(bbox)} and {filters.sql()}
             """,
             [files],
         ).fetchone()
@@ -150,11 +153,16 @@ def parse_years(spec: str | None, published: list[int]) -> list[int]:
 
 
 def summaries(
-    bbox: BBox, years: list[int], progress: Progress | None = None
+    bbox: BBox,
+    years: list[int],
+    progress: Progress | None = None,
+    filters: Filters = NO_FILTERS,
 ) -> list[dict]:
     """``summarize`` for each year, each on its own connection so the years run at once."""
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(summarize, connect(), bbox, year) for year in years]
+        futures = [
+            pool.submit(summarize, connect(), bbox, year, filters) for year in years
+        ]
         for done, _ in enumerate(as_completed(futures), 1):
             if progress:
                 progress(done, len(years))
@@ -162,7 +170,11 @@ def summaries(
 
 
 def fields(
-    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, limit: int
+    con: duckdb.DuckDBPyConnection,
+    bbox: BBox,
+    year: int,
+    limit: int,
+    filters: Filters = NO_FILTERS,
 ) -> list[dict]:
     """Up to ``limit`` fields in ``bbox`` with GeoJSON geometry, largest first."""
     files = hrefs(con, bbox, year)
@@ -173,7 +185,7 @@ def fields(
             f"""
             select id, round("metrics:area" / 1e4, 2) as area_ha, score,
                    ST_AsGeoJSON(geometry) as geometry
-            from read_parquet(?) where {_in_bbox(bbox)}
+            from read_parquet(?) where {_in_bbox(bbox)} and {filters.sql()}
             order by "metrics:area" desc limit {int(limit)}
             """,
             [files],
@@ -189,6 +201,7 @@ def export(
     out: Path,
     limit: int | None,
     crs: str = "4326",
+    filters: Filters = NO_FILTERS,
 ) -> dict:
     """Write the fields of ``years`` in ``bbox`` to ``out``, with a ``year`` column.
 
@@ -222,7 +235,7 @@ def export(
             select * exclude (bbox, zone)
                      replace (ST_Transform(geometry, 'EPSG:4326', '{target}') as geometry),
                    {year}::USMALLINT as year{extra}
-            from read_parquet(?) where {_in_bbox(bbox)}
+            from read_parquet(?) where {_in_bbox(bbox)} and {filters.sql()}
             """
         )
     query = " union all by name ".join(selects)

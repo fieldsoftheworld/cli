@@ -43,6 +43,16 @@ CrsArg = Annotated[
         help='CRS to write: an EPSG code such as 3857, or "utm" to keep UTM meters.'
     ),
 ]
+MinArea = Annotated[
+    float | None, Parameter(help="Keep fields of at least this many m².")
+]
+MaxArea = Annotated[
+    float | None, Parameter(help="Keep fields of at most this many m².")
+]
+MinScore = Annotated[
+    float | None,
+    Parameter(help="Keep fields with a model score (0-100) of at least this."),
+]
 LARGE_AREA_KM2 = 10_000
 
 
