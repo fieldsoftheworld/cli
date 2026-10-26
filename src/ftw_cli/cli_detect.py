@@ -30,8 +30,19 @@ BufferDays = Annotated[
     int, Parameter(help="Days either side of the crop calendar date.")
 ]
 CloudMax = Annotated[float, Parameter(help="Maximum scene cloud cover, in percent.")]
-InputTif = Annotated[
-    Path, Parameter(validator=validators.Path(exists=True, dir_okay=False))
+ImageryTif = Annotated[
+    Path,
+    Parameter(
+        validator=validators.Path(exists=True, dir_okay=False),
+        help="Imagery COG from `ftw imagery download`.",
+    ),
+]
+ScoresTif = Annotated[
+    Path,
+    Parameter(
+        validator=validators.Path(exists=True, dir_okay=False),
+        help="Probabilities COG from `ftw predict`.",
+    ),
 ]
 FieldsOut = Annotated[
     Path, Parameter(help="Fields to write: .parquet (fiboa), .gpkg, .geojson, or .fgb.")
@@ -72,19 +83,19 @@ def detect(
 
 
 def predict(
-    input: InputTif,
+    input: ImageryTif,
     *,
     out: Annotated[Path, Parameter(help="COG of field and boundary probabilities.")],
     model: ModelName = registry.DEFAULT_MODEL,
     patch_size: Annotated[int | None, Parameter(help="Pixels per patch.")] = None,
     batch_size: Annotated[int, Parameter(help="Patches per model call.")] = 4,
 ):
-    """Predict field and boundary probabilities for INPUT, from `ftw imagery download`."""
+    """Predict field and boundary probabilities for INPUT."""
     output.emit(_predict(input, out, model, patch_size, batch_size))
 
 
 def polygonize(
-    input: InputTif,
+    input: ScoresTif,
     *,
     out: FieldsOut,
     crs: CrsArg = "4326",
@@ -94,7 +105,7 @@ def polygonize(
         float | None, Parameter(help="Drop larger fields, in m².")
     ] = None,
 ):
-    """Split INPUT, from `ftw predict`, into fields with BoundaryVote."""
+    """Split INPUT into fields with BoundaryVote."""
     output.emit(_polygonize(input, out, simplify, min_size, max_size, crs))
 
 

@@ -151,6 +151,43 @@ def doctor():
         raise SystemExit(1)
 
 
+@app.command
+def schema(
+    *command: Annotated[
+        str, Parameter(help="A command, such as `detect` or `data query`.")
+    ],
+):
+    """Each command's parameters as JSON Schema, or one command's: `ftw schema data query`."""
+    from ftw_cli import schema as schemas
+
+    found = schemas.commands(app)
+    if command:
+        name = " ".join(("ftw", *command))
+        if name not in found:
+            raise LookupError(f"no command {name!r}; try one of: {', '.join(found)}")
+        found = {name: found[name]}
+    output.print_json({name: schemas.schema(sub) for name, sub in found.items()})
+
+
+@app.command
+def skill(
+    *,
+    out: Annotated[
+        Path | None,
+        Parameter(help="Write DIR/ftw/SKILL.md, e.g. --out ~/.claude/skills."),
+    ] = None,
+):
+    """The agent skill that teaches ftw: printed, or installed into a skills directory."""
+    text = (Path(__file__).parent / "SKILL.md").read_text()
+    if out is None:
+        sys.stdout.write(text)
+        return
+    path = out.expanduser() / "ftw" / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    output.emit({"path": str(path)})
+
+
 def _report(kind, error, traceback):
     if issubclass(kind, EXPECTED):
         output.stderr.print(f"[red]error:[/red] {error}")
