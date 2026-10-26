@@ -17,8 +17,7 @@ models = App(name="models", help="Released FTW models the CLI can run.")
 infer = App(name="infer", help="Run FTW models and split their output into fields.")
 
 ModelName = Annotated[
-    Literal[tuple(registry.MODELS)],  # type: ignore[valid-type]
-    Parameter(help="Model to run; see `ftw models list`."),
+    registry.ModelName, Parameter(help="Model to run; see `ftw models list`.")
 ]
 Host = Annotated[
     Literal["mspc", "earthsearch"],
@@ -160,7 +159,11 @@ def _download(
 
 
 def _run(
-    input: Path, out: Path, model: str, patch_size: int | None, batch_size: int
+    input: Path,
+    out: Path,
+    model: registry.ModelName,
+    patch_size: int | None,
+    batch_size: int,
 ) -> dict:
     require("inference")
     from ftw_cli import infer as onnx

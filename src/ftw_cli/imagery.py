@@ -102,9 +102,10 @@ def search(
             target_date=when.isoformat(),
             cloud_cover=item.properties["eo:cloud_cover"],
             aoi_nodata=_aoi_nodata(con, item.geometry, bbox),
-            href=item.get_self_href(),
+            href=href,
         )
         for item in items
+        if item.datetime and item.geometry and (href := item.get_self_href())
     ]
     usable = [s for s in scenes if s.aoi_nodata <= MAX_AOI_NODATA]
     if not usable:
@@ -179,7 +180,7 @@ def download(
                 for b in stack[i * n : (i + 1) * n]
             ]
 
-    latest = max(i.datetime for i in items)
+    latest = max(i.datetime for i in items if i.datetime)
     cog.write(
         out,
         np.stack(stack),
@@ -228,11 +229,11 @@ def _from_day(year: int, day: int) -> date:
 
 def _aoi_nodata(con: duckdb.DuckDBPyConnection, footprint: dict, bbox: BBox) -> float:
     """Percent of ``bbox`` outside the scene's footprint (planar in degrees, fine at AOI scale)."""
-    covered = con.execute(
+    [(covered,)] = con.execute(
         f"""select ST_Area(ST_Intersection(ST_GeomFromGeoJSON(?), {bbox.envelope()}))
                    / ST_Area({bbox.envelope()})""",
         [json.dumps(footprint)],
-    ).fetchone()[0]
+    ).fetchall()
     return round(100 * (1 - (covered or 0)), 1)
 
 

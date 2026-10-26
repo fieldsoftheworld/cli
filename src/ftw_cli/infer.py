@@ -22,7 +22,7 @@ BANDS = ("field", "boundary")
 def run(
     input: Path,
     out: Path,
-    model: str = models.DEFAULT_MODEL,
+    model: models.ModelName = models.DEFAULT_MODEL,
     patch_size: int | None = None,
     batch_size: int = 4,
     progress: Callable[[int, int | None], None] | None = None,
@@ -56,7 +56,7 @@ def run(
         stride = size - 2 * pad
         # Rows go south to north, like torchgeo's sampler, since later patches overwrite overlaps.
         windows = [
-            Window(col, height - size - row, size, size)
+            Window(col, height - size - row, size, size)  # ty: ignore[too-many-positional-arguments]
             for row in _starts(height, size, stride)
             for col in _starts(width, size, stride)
         ]
@@ -73,8 +73,8 @@ def run(
             f = spec.resize_factor
             probs = _softmax(logits[:, :, ::f, ::f])[:, 1:]
             predictions = np.rint(probs * 255).astype(np.uint8)
-            for w, pred in zip(batch, predictions, strict=True):
-                _paste(scores, pred, w, pad)
+            for j, w in enumerate(batch):
+                _paste(scores, predictions[j], w, pad)
             if progress:
                 progress(i + len(batch), len(windows))
         profile = src.profile | {"nodata": None}

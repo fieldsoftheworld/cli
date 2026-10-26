@@ -7,6 +7,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 PRUE_CCBY = "https://huggingface.co/fieldsoftheworld/ftw-prue-ccby/resolve/ffe4452768e1054b1d7c2ab39b84b4170f90c7cf/"
 
@@ -23,7 +24,8 @@ class Model:
     resize_factor: int = 2
 
 
-MODELS = {
+ModelName = Literal["prue-ccby-b3", "prue-ccby-b5", "prue-ccby-b7"]
+MODELS: dict[ModelName, Model] = {
     "prue-ccby-b3": Model(
         PRUE_CCBY + "prue_efnetb3_ccby-b35d59a6.onnx",
         "37f8d087147bb08a2c9ef5c46e7ec4d720d740aa24ccef2eee242243149dd5df",
@@ -43,20 +45,22 @@ MODELS = {
         "CC-BY-4.0",
     ),
 }
-DEFAULT_MODEL = "prue-ccby-b5"
+DEFAULT_MODEL: ModelName = "prue-ccby-b5"
 
 
 def cache_dir() -> Path:
     return Path(os.environ.get("FTW_CACHE_DIR", Path.home() / ".cache" / "ftw-cli"))
 
 
-def cached(name: str) -> Path | None:
+def cached(name: ModelName) -> Path | None:
     """The local copy of model ``name``, if it has been downloaded."""
     path = _path(name)
     return path if path.exists() else None
 
 
-def fetch(name: str, progress: Callable[[int, int | None], None] | None = None) -> Path:
+def fetch(
+    name: ModelName, progress: Callable[[int, int | None], None] | None = None
+) -> Path:
     """Local path to model ``name``, downloading and verifying it on first use."""
     path = _path(name)
     if path.exists():
@@ -81,5 +85,5 @@ def fetch(name: str, progress: Callable[[int, int | None], None] | None = None) 
     return path
 
 
-def _path(name: str) -> Path:
+def _path(name: ModelName) -> Path:
     return cache_dir() / "models" / MODELS[name].url.rsplit("/", 1)[-1]
