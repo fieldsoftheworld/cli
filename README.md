@@ -40,11 +40,11 @@ fields  2017 █▅█▇▁▃▄▄▄ 2025  -14% since 2017
 ftw detect "Ames, Iowa" --year 2024 --out ames.gpkg
 ```
 
-This picks the least cloudy Sentinel-2 scenes near planting and harvest from the crop calendar, downloads them, runs a PRUE model through onnxruntime (on a GPU if there is one), and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`, the setting behind the 2nd Edition). `--out` takes `.parquet`, `.gpkg`, `.geojson`, or `.fgb`; Parquet is fiboa GeoParquet with the model and BoundaryVote setting in its metadata, which the other formats have no place for. Output is in EPSG:4326 unless you pass `--crs`, either an EPSG code such as `3857` or `utm` to keep the imagery's UTM meters; `ftw data query --out` takes `--crs` too, where `utm` is the zone at the area's center. The imagery and probabilities are deleted afterwards unless you pass `--keep DIR`. The steps are also separate commands:
+By default this runs the way the FTW 2nd Edition was made. It reads the year's four quarterly cloudless Sentinel-2 mosaics from their anonymous [Source Cooperative mirror](https://source.coop/tge-labs/sentinel-2-quarterly-cloudless-mosaics), one Sentinel-2 grid tile at a time and only the part over the area, runs the [ftw-q](https://huggingface.co/fieldsoftheworld/ftw-q) model through onnxruntime (on a GPU if there is one) at 2.5 m, and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`). A field on a tile seam is kept by the tile whose 100 km square and UTM zone hold its centre, as in the 2nd Edition. Expect about 1.5 minutes per tile on a CPU for a 10 km box. With `--model prue-ccby-b5` (or `-b3`, `-b7`) it instead picks two scenes near planting and harvest from the crop calendar. `--out` takes `.parquet`, `.gpkg`, `.geojson`, or `.fgb`; Parquet is fiboa GeoParquet with the model and BoundaryVote setting in its metadata, which the other formats have no place for. Output is in EPSG:4326 unless you pass `--crs`, either an EPSG code such as `3857` or `utm` to keep the imagery's UTM meters; `ftw data query --out` takes `--crs` too, where `utm` is the zone at the area's center. The rasters are deleted afterwards unless you pass `--keep DIR`; with ftw-q, each tile's probabilities are kept there as a COG, and a rerun over the same area reuses them instead of reading and predicting again. The steps are also separate commands:
 
 ```sh
 ftw imagery download "Ames, Iowa" --year 2024 --out ames.tif
-ftw predict ames.tif --out scores.tif --model prue-ccby-b7
+ftw predict ames.tif --out scores.tif --model prue-ccby-b7    # the PRUE models
 ftw polygonize scores.tif --out fields.parquet
 ```
 

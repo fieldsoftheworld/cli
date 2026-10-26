@@ -27,7 +27,7 @@ AREA is a quoted place name (`"Story County, Iowa"`) or `xmin,ymin,xmax,ymax` in
 
 ## Rules
 
-- Use `data query` rather than `detect` for 2017 to 2025. It reads precomputed fields in seconds; `detect` downloads imagery and runs a model, which takes tens of seconds to minutes and needs `pip install 'ftw-cli[inference]'`.
+- Use `data query` rather than `detect` for 2017 to 2025. It reads precomputed fields in seconds; `detect` reads imagery and runs a model, about 1.5 minutes per 10 km tile on a CPU, and needs `pip install 'ftw-cli[inference]'`. Pass `--keep DIR` when you may rerun the same area: the kept probabilities are reused.
 - `--out` picks the format from the suffix. `.parquet` is fiboa GeoParquet and the only format that keeps the collection metadata (model, method, date). Use `.gpkg` for desktop GIS and `.geojson` for small web maps.
 - Output is EPSG:4326 unless you pass `--crs` with an EPSG code (`3857`) or `utm`. `utm` is the zone at the area's center for `data query` and the imagery's own zone for `detect`. `metrics:area` is always in m² and `metrics:perimeter` in m.
 - Areas over 10,000 km² read several GB. Narrow the area first when you can.
