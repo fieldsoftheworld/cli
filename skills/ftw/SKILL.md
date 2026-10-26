@@ -24,6 +24,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | Fields in imagery from any year, including ones the 2nd Edition lacks | `ftw detect AREA --year Y --out fields.gpkg` |
 | A picture of the fields | `ftw view AREA --out map.png` |
 | How well one set of fields reproduces another (precision, recall, IoU) | `ftw compare REFERENCE PREDICTION` |
+| Per-field statistics from rasters (NDVI, elevation, imagery) | `ftw stats FIELDS --raster R.tif --out out.gpkg` |
 | Whether the install and network work | `ftw doctor` |
 | Every parameter of a command as JSON Schema | `ftw schema [COMMAND]` |
 
@@ -37,7 +38,8 @@ AREA is a quoted place name (`"Story County, Iowa"`), `xmin,ymin,xmax,ymax` in d
 - Areas over 10,000 km² read several GB. Narrow the area first when you can.
 - `--min-area` and `--max-area` (m²) and `--min-score` (0 to 100) filter fields before counting or writing, on `data query` and `view`; `detect` takes the area bounds and drops fields under 500 m² by default.
 - A failure prints one `error:` line on stderr and exits 1. A missing extra says which `pip install` fixes it.
-- `score` (0 to 100) in the 2nd Edition is the model's confidence in a field.
+- `score` (0 to 100) is the field's mean field probability × 100, the same in the 2nd Edition and in `detect` output; `detect` also writes `field_prob` and `boundary_prob` (0 to 1). Every field is one Polygon.
+- `ftw stats` columns are `{band}_{stat}` for mean, stdev, min, max, and count. Pixels are weighted by how much of them a field covers, so `count` is fractional. It needs `pip install 'ftw-cli[stats]'`.
 
 ## Examples
 
@@ -47,5 +49,6 @@ ftw data query "Ames, Iowa" --year all | jq '.[] | {year, fields}'
 ftw data query "Story County, Iowa" --year 2023 --out story.gpkg --crs utm | jq .crs
 ftw data query "-93.7,41.95,-93.6,42.05" --out ames.parquet
 ftw detect "Poltava, Ukraine" --year 2024 --out poltava.gpkg
+ftw stats story.gpkg --raster ndvi.tif --out story_ndvi.gpkg
 ftw schema detect
 ```

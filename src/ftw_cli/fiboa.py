@@ -18,6 +18,8 @@ SCHEMAS = [
     "https://fiboa.org/specification/v0.3.0/schema.yaml",
     "https://vecorel.org/geometry-metrics-extension/v0.1.0/schema.yaml",
 ]
+# Schema language for columns a collection adds beyond fiboa's, under "schemas:custom".
+SDL = "https://vecorel.org/sdl/v0.2.0/schema.json"
 ROW_GROUP_SIZE = 50_000
 # Vecorel requires these; every other column must be nullable.
 REQUIRED = {"id", "geometry", "collection"}
@@ -87,7 +89,7 @@ def _schema(source: pa.Schema) -> pa.Schema:
 def _geo(con: duckdb.DuckDBPyConnection, crs: str) -> dict:
     column = {
         "encoding": "WKB",
-        "geometry_types": ["Polygon", "MultiPolygon"],
+        "geometry_types": ["Polygon"],
         "covering": {
             "bbox": {k: ["bbox", k] for k in ("xmin", "ymin", "xmax", "ymax")}
         },

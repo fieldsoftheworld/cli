@@ -34,6 +34,7 @@ optional-dependencies.inference = [
   "ftw-fbp[fast]>=0.1",
   "onnxruntime>=1.20",
 ]
+optional-dependencies.stats = [ "exactextract>=0.3", "rasterio>=1.4" ]
 scripts.ftw = "ftw_cli.cli:run"
 
 [dependency-groups]

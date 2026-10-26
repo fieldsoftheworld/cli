@@ -31,6 +31,15 @@ def utm_zone(lon: float, lat: float) -> str:
     return f"EPSG:{(32600 if lat >= 0 else 32700) + int((lon + 180) // 6) % 60 + 1}"
 
 
+def polygon(column: str = "geometry") -> str:
+    """SQL for ``column`` as one Polygon: a multi-part geometry keeps its largest polygon."""
+    return (
+        f"list_max(list_transform(list_filter(ST_Dump({column}), "
+        "lambda d: ST_GeometryType(d.geom)::varchar = 'POLYGON'), "
+        "lambda d: {'area': ST_Area(d.geom), 'geom': d.geom})).geom"
+    )
+
+
 def write(
     con: duckdb.DuckDBPyConnection,
     query: str,
@@ -46,6 +55,10 @@ def write(
     """
     check(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    query = (
+        f"select * from (select * replace ({polygon()} as geometry) from ({query})) "
+        "where geometry is not null"
+    )
     if out.suffix.lower() == ".parquet":
         return fiboa.copy(con, query, out, meta, params, crs)
     out.unlink(missing_ok=True)  # GDAL appends to an existing GeoPackage

@@ -20,7 +20,7 @@ from ftw_cli.cli_args import (
     YearsArg,
     parse_area,
 )
-from ftw_cli.cli_compare import compare, diff
+from ftw_cli.cli_compare import compare, diff, stats
 from ftw_cli.cli_detect import detect, imagery, models, polygonize, predict
 from ftw_cli.filters import Filters
 from ftw_cli.progress import bar, spinner
@@ -32,7 +32,7 @@ app = App(
 )
 data = App(name="data", help="Query the FTW Global Data 2nd Edition in place.")
 data.command(diff)
-for command in (detect, predict, polygonize, compare, data, imagery, models):
+for command in (detect, predict, polygonize, compare, stats, data, imagery, models):
     app.command(command)
 app.register_install_completion_command()
 

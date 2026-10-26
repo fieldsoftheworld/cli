@@ -13,7 +13,7 @@ uv tool install 'ftw-cli[inference] @ git+https://github.com/fieldsoftheworld/cl
 ftw --install-completion
 ```
 
-The base install queries, exports, and draws the 2nd Edition. The `imagery` extra adds Sentinel-2 download, and `inference` adds the models.
+The base install queries, exports, and draws the 2nd Edition. The `imagery` extra adds Sentinel-2 download, `inference` adds the models, and `stats` adds `ftw stats`.
 
 ## Use
 
@@ -52,7 +52,7 @@ fields  2017 █▅█▇▁▃▄▄▄ 2025  -14% since 2017
 ftw detect "Ames, Iowa" --year 2024 --out ames.gpkg
 ```
 
-By default this runs the way the FTW 2nd Edition was made. It reads the year's four quarterly cloudless Sentinel-2 mosaics from their anonymous [Source Cooperative mirror](https://source.coop/tge-labs/sentinel-2-quarterly-cloudless-mosaics), one Sentinel-2 grid tile at a time and only the part over the area, runs the [ftw-q](https://huggingface.co/fieldsoftheworld/ftw-q) model through onnxruntime (on a GPU if there is one) at 2.5 m, and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`). A field on a tile seam is kept by the tile whose 100 km square and UTM zone hold its centre, as in the 2nd Edition. Expect about 1.5 minutes per tile on a CPU for a 10 km box. With `--model prue-ccby-b5` (or `-b3`, `-b7`) it instead picks two scenes near planting and harvest from the crop calendar. `--out` takes `.parquet`, `.gpkg`, `.geojson`, or `.fgb`; Parquet is fiboa GeoParquet with the model and BoundaryVote setting in its metadata, which the other formats have no place for. Output is in EPSG:4326 unless you pass `--crs`, either an EPSG code such as `3857` or `utm` to keep the imagery's UTM meters; `ftw data query --out` takes `--crs` too, where `utm` is the zone at the area's center. The rasters are deleted afterwards unless you pass `--keep DIR`; with ftw-q, each tile's probabilities are kept there as a COG, and a rerun over the same area reuses them instead of reading and predicting again. The steps are also separate commands:
+By default this runs the way the FTW 2nd Edition was made. It reads the year's four quarterly cloudless Sentinel-2 mosaics from their anonymous [Source Cooperative mirror](https://source.coop/tge-labs/sentinel-2-quarterly-cloudless-mosaics), one Sentinel-2 grid tile at a time and only the part over the area, runs the [ftw-q](https://huggingface.co/fieldsoftheworld/ftw-q) model through onnxruntime (on a GPU if there is one) at 2.5 m, and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`). A field on a tile seam is kept by the tile whose 100 km square and UTM zone hold its centre, as in the 2nd Edition. Expect about 1.5 minutes per tile on a CPU for a 10 km box. With `--model prue-ccby-b5` (or `-b3`, `-b7`) it instead picks two scenes near planting and harvest from the crop calendar. `--out` takes `.parquet`, `.gpkg`, `.geojson`, or `.fgb`; Parquet is fiboa GeoParquet with the model and BoundaryVote setting in its metadata, which the other formats have no place for. Output is in EPSG:4326 unless you pass `--crs`, either an EPSG code such as `3857` or `utm` to keep the imagery's UTM meters; `ftw data query --out` takes `--crs` too, where `utm` is the zone at the area's center. Each field is one Polygon with the 2nd Edition's `score` (its mean field probability × 100, rounded) and its mean field and boundary probabilities as `field_prob` and `boundary_prob`; in Ames, the mean score of ftw-q's fields is 67.1, as in the 2nd Edition. The rasters are deleted afterwards unless you pass `--keep DIR`; with ftw-q, each tile's probabilities are kept there as a COG, and a rerun over the same area reuses them instead of reading and predicting again. The steps are also separate commands:
 
 ```sh
 ftw imagery download "Ames, Iowa" --year 2024 --out ames.tif
@@ -69,6 +69,14 @@ ftw compare reference.parquet detected.gpkg --out matches.parquet
 ```
 
 `ftw compare` matches each field in the second file to at most one field in the first by intersection over union (IoU at least 0.5 by default, `--iou` to change it), measured in the UTM zone of the reference. It reports precision, recall, F1, the mean IoU of the matches, the share of reference area that is matched, and how many predicted fields merge several reference fields or split one. The files can be in any of the formats above and any CRS. `--out` writes the second file's fields with `match_iou` and `matched_id`. Detecting Ames, Iowa for 2024 with ftw-q and comparing it with the 2nd Edition for the same year matches 467 of its 578 fields (precision 0.81, recall 0.81, mean IoU 0.86).
+
+## Field statistics from rasters
+
+```sh
+ftw stats fields.parquet --raster ndvi.tif --raster dem.tif --out fields_stats.gpkg
+```
+
+`ftw stats` adds each field's mean, standard deviation, minimum, maximum, and pixel count from every band of each raster, in any CRS. Columns are named `{band}_{stat}` after the band's description (`B04_2024_03_19_mean`), or `{raster}_b{n}_{stat}` when a band has none. `--bands 1,2` picks bands. [exactextract](https://github.com/isciences/exactextract) weights each pixel by the share of it inside the field, so a field smaller than a pixel still gets values and `count` is the covered pixel area, not a whole number. A multi-part field is measured and written as its largest polygon. It needs the `stats` extra.
 
 ## For scripts and agents
 
