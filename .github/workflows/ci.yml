@@ -5,16 +5,26 @@ on:
   push:
     branches: [main]
 
+# A new push to a branch cancels its run that is still going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.14"
-          enable-cache: true
+          # Caching and keeping downloaded wheels are setup-uv's defaults since v10.
+          cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
       - run: uv run pre-commit run --all-files
 
   tests:
@@ -25,11 +35,18 @@ jobs:
         python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
+          # Caching and keeping downloaded wheels are setup-uv's defaults since v10.
+          cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
+      # httpfs and spatial, which every DuckDB connection installs.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: duckdb-${{ runner.os }}-
       - run: uv run pytest
       - if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
         run: uv run pytest -m integration
@@ -39,10 +56,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.14"
-          enable-cache: true
+          # Caching and keeping downloaded wheels are setup-uv's defaults since v10.
+          cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
       - run: uv run python tests/samples.py samples
       - run: uvx --from 'fiboa-cli>=0.21,<0.22' fiboa validate samples/fields.parquet
