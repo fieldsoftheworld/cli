@@ -21,6 +21,7 @@ An area is a place name, `xmin,ymin,xmax,ymax` in degrees, or a polygon file (`.
 
 ```sh
 ftw data query "Story County, Iowa"                  # field count, area, mean score
+ftw data query "Story County, Iowa" --stats          # plus field-size percentiles and size classes
 ftw data query "Ames, Iowa" --year all              # the same for every year, with a trend line
 ftw data query "Poltava, Ukraine" --year 2019..2024 --out poltava.parquet
 ftw view "Chartres, France" --out chartres.png       # a map of the fields
@@ -30,9 +31,12 @@ ftw view "Chartres, France" --out chartres.png       # a map of the fields
 
 `--min-area` and `--max-area` (m²) keep fields in a size range, and `--min-score` keeps fields the model scored at least that high (0 to 100). They work on `data query` and `view`, and the area bounds also work on `detect` and `polygonize`, which drop fields under 500 m² unless told otherwise:
 
+
 ```sh
 ftw data query "Ames, Iowa" --min-area 50000 --min-score 80 --out big.parquet
 ```
+
+`--stats` adds field size in hectares: the 10th, 25th, 50th, 75th, and 90th percentiles, and the number and total area of fields under 1 ha, 1 to 10 ha, 10 to 100 ha, and 100 ha or more. Over several years it adds the median field size for each year, with its own trend line.
 
 `--year` takes one year, a range (`2019..2024`), a list (`2018,2021,2024`), or `all`. Several years give one summary row per year, ending with a trend line:
 

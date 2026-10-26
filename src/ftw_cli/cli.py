@@ -105,6 +105,12 @@ def query(
     min_area: MinArea = None,
     max_area: MaxArea = None,
     min_score: MinScore = None,
+    stats: Annotated[
+        bool,
+        Parameter(
+            help="Add field-size percentiles and size classes, in ha; the median per year for several years."
+        ),
+    ] = False,
 ):
     """Summarize the fields in AREA per year, or write them to a file with --out."""
     box = parse_area(area)
@@ -117,12 +123,23 @@ def query(
             output.emit(ftw2e.export(con, box, years, out, limit, crs, filters))
         return
     with bar(f"Reading FTW {label} fields") as progress:
-        rows = ftw2e.summaries(box, years, progress, filters)
+        rows = ftw2e.summaries(box, years, progress, filters, stats)
     if len(rows) == 1:
         output.emit(rows[0], title=f"FTW {label} fields")
         return
-    output.emit(rows, title="FTW fields by year")
-    output.trend("fields", [r["fields"] for r in rows], [r["year"] for r in rows])
+    # Several years: the full statistics would be too wide a table; keep the median.
+    keys = [
+        "year",
+        "fields",
+        "area_ha",
+        "mean_score",
+        *(["median_ha"] if stats else []),
+    ]
+    output.emit([{k: r[k] for k in keys} for r in rows], title="FTW fields by year")
+    years_ = [r["year"] for r in rows]
+    output.trend("fields", [r["fields"] for r in rows], years_)
+    if stats:
+        output.trend("median ha", [r["median_ha"] or 0 for r in rows], years_)
 
 
 @app.command

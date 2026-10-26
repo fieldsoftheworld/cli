@@ -8,6 +8,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 `ftw` queries the FTW 2nd Edition, field boundaries for 2017 to 2025 worldwide, where it is published, and runs FTW models on new Sentinel-2 imagery. Piped output is JSON on stdout. Progress, the geocoded place, and errors go to stderr.
 
 - `data query` prints `{year, fields, area_ha, mean_score}`, with `area_ha` the total field area in hectares. With several years (`--year 2019..2024`, `2018,2024`, or `all`) it prints a list of those, one per year.
+- `data query --stats` adds field size in hectares: `p10_ha`, `p25_ha`, `median_ha`, `p75_ha`, `p90_ha`, and `fields_*` and `area_*_ha` for the classes `lt_1ha`, `1_10ha`, `10_100ha`, and `ge_100ha`. Over several years it adds `median_ha` per year.
 - With `--out`, the output includes `{path, fields, crs}`, so `crs` confirms the CRS written.
 - Without `--year`, `data query` uses the latest year (2025). An area with no published fields gives `fields: 0`, and `--out` then fails with an error.
 
@@ -16,6 +17,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | Need | Command |
 |---|---|
 | Field count, area, and mean score in an area | `ftw data query AREA [--year Y]` |
+| How large the fields are (smallholder or industrial) | `ftw data query AREA --stats` |
 | The fields themselves, for one or several years (with a `year` column) | `ftw data query AREA --year Y --out fields.parquet` |
 | How the fields changed over the years | `ftw data query AREA --year all` |
 | Fields in imagery from any year, including ones the 2nd Edition lacks | `ftw detect AREA --year Y --out fields.gpkg` |

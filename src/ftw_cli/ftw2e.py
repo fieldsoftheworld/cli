@@ -111,21 +111,70 @@ def hrefs(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[str]:
     return [h for (h,) in con.execute(query, [year]).fetchall()]
 
 
+# Size classes in hectares, as (key suffix, lower bound, upper bound).
+SIZE_CLASSES = (
+    ("lt_1ha", 0, 1),
+    ("1_10ha", 1, 10),
+    ("10_100ha", 10, 100),
+    ("ge_100ha", 100, None),
+)
+QUANTILES = (
+    ("p10_ha", 0.1),
+    ("p25_ha", 0.25),
+    ("median_ha", 0.5),
+    ("p75_ha", 0.75),
+    ("p90_ha", 0.9),
+)
+
+
 def summarize(
-    con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, filters: Filters = NO_FILTERS
+    con: duckdb.DuckDBPyConnection,
+    bbox: BBox,
+    year: int,
+    filters: Filters = NO_FILTERS,
+    stats: bool = False,
 ) -> dict:
+    """Count, area, and mean score of the fields in ``bbox``; ``stats`` adds ``size_stats``."""
     files = hrefs(con, bbox, year)
     row = (0, 0, None)
     if files:
-        row = con.execute(
+        # fetchall: DuckDB 2.0 refuses the next query while a result is still open.
+        [row] = con.execute(
             f"""
             select count(*), round(sum("metrics:area") / 1e4, 1), round(avg(score), 1)
             from read_parquet(?) where {_in_bbox(bbox)} and {filters.sql()}
             """,
             [files],
-        ).fetchone()
-    count, area, score = row or (0, 0, None)
-    return {"year": year, "fields": count, "area_ha": area or 0, "mean_score": score}
+        ).fetchall()
+    count, area, score = row
+    summary = {"year": year, "fields": count, "area_ha": area or 0, "mean_score": score}
+    return summary | size_stats(con, bbox, files, filters) if stats else summary
+
+
+def size_stats(
+    con: duckdb.DuckDBPyConnection,
+    bbox: BBox,
+    files: list[str],
+    filters: Filters = NO_FILTERS,
+) -> dict:
+    """Field-size quantiles, and the count and area of fields in each size class, in ha."""
+    columns = [f"round(quantile_cont(ha, {q}), 2) as {name}" for name, q in QUANTILES]
+    for name, lo, hi in SIZE_CLASSES:
+        where = f"ha >= {lo}" + (f" and ha < {hi}" if hi else "")
+        columns += [
+            f"count(*) filter (where {where}) as fields_{name}",
+            f"coalesce(round(sum(ha) filter (where {where}), 1), 0) as area_{name}_ha",
+        ]
+    source = (
+        f'select "metrics:area" / 1e4 as ha from read_parquet(?) '
+        f"where {_in_bbox(bbox)} and {filters.sql()}"
+        if files
+        else "select null::double as ha where false"
+    )
+    rel = con.execute(
+        f"select {', '.join(columns)} from ({source})", [files] if files else []
+    )
+    return _records(rel)[0]
 
 
 def parse_years(spec: str | None, published: list[int]) -> list[int]:
@@ -157,11 +206,13 @@ def summaries(
     years: list[int],
     progress: Progress | None = None,
     filters: Filters = NO_FILTERS,
+    stats: bool = False,
 ) -> list[dict]:
     """``summarize`` for each year, each on its own connection so the years run at once."""
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [
-            pool.submit(summarize, connect(), bbox, year, filters) for year in years
+            pool.submit(summarize, connect(), bbox, year, filters, stats)
+            for year in years
         ]
         for done, _ in enumerate(as_completed(futures), 1):
             if progress:
