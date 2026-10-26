@@ -15,12 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.14"
-          enable-cache: true
-          # Keep downloaded wheels too, not just ones built from source.
-          prune-cache: false
+          # Caching and keeping downloaded wheels are setup-uv v10's defaults.
           cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
       - uses: actions/cache@v6
@@ -37,12 +35,10 @@ jobs:
         python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
-          # Keep downloaded wheels too, not just ones built from source.
-          prune-cache: false
+          # Caching and keeping downloaded wheels are setup-uv v10's defaults.
           cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
       # httpfs and spatial, which every DuckDB connection installs.
@@ -60,12 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.14"
-          enable-cache: true
-          # Keep downloaded wheels too, not just ones built from source.
-          prune-cache: false
+          # Caching and keeping downloaded wheels are setup-uv v10's defaults.
           cache-suffix: ${{ github.job }}
       - run: uv sync --locked --all-extras
       - run: uv run python tests/samples.py samples
