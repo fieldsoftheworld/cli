@@ -29,6 +29,7 @@ Working now:
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
 - `ftw doctor`: versions, extras, GPU, cache, and whether each remote service answers, run in parallel.
+- `ftw schema [COMMAND]`: each command's parameters as JSON Schema, generated from cyclopts so it can't drift from `--help`; a test fails if any command or parameter lacks a description. `ftw skill [--out DIR]`: the packaged `SKILL.md`, printed or installed as `DIR/ftw/SKILL.md`.
 - `ftw detect AREA --year --out`: imagery, model, and BoundaryVote in one step, writing fields to .parquet (fiboa), .gpkg, .geojson, or .fgb, with `--keep DIR` to keep the rasters and `--crs` (an EPSG code, or `utm`) for the output CRS. Non-4326 GeoParquet carries PROJJSON, which `fiboa.py` gets from DuckDB's bundled PROJ by writing a one-row file, so the base install needs no pyproj. `ftw predict` and `ftw polygonize` run the two halves, and `ftw models list` shows the models. Splitting with `fbp.FTW_2E` keeps touching fields apart; connected regions of the field class, as in ftw-baselines, merge them wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:
@@ -38,7 +39,6 @@ Planned:
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
 - ftw-q (quarterly mosaics) and FTP (PlanetScope), which need their own imagery commands.
 - `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
-- `ftw schema [command]`: a command's parameters as JSON Schema, for agents.
 
 ## Models
 
@@ -73,7 +73,7 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 1. `data` query and export, `view`, CI. (Done.)
 2. `imagery`, `models`, `detect`, `predict`, and `polygonize` with BoundaryVote. (Done.)
 3. `catalog`, `join catalog`, and `join sql`.
-4. `view --web`, `schema`, and `SKILL.md`.
+4. `schema` and `SKILL.md`. (Done.) `view --web`.
 
 ## Open questions
 

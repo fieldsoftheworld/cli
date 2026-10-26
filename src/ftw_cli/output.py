@@ -43,6 +43,14 @@ def emit(data: dict | list[dict], title: str | None = None) -> None:
         console.print(table)
 
 
+def print_json(data: object) -> None:
+    """JSON either way: pretty and colored in a terminal, compact when piped."""
+    if JSON:
+        sys.stdout.write(json.dumps(data, default=str) + "\n")
+    else:
+        console.print_json(data=data, default=str)
+
+
 def trend(label: str, values: list[float], keys: list[object]) -> None:
     """A one-line sparkline of ``values``, for people only."""
     if JSON or len(values) < 2:
