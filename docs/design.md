@@ -4,11 +4,12 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 
 ## Principles
 
-- Every feature is a plain function in `ftw_cli` that returns data. The command line and the TUI both call those functions.
+- Every feature is a plain function in `ftw_cli` that returns data, and the command line is a thin layer over them.
+- ftw-cli writes standard files (GeoParquet, GeoTIFF) and leaves interactive viewing to tools built for it, such as QGIS and lonboard.
 - Data is read where it lives. DuckDB reads the 2nd Edition's small file index, then only the row groups that overlap the request. A 10 km box in Iowa reads one 2.3 GB file in about 3 seconds.
 - Output is a table in a terminal and JSON when piped or with `--json`. Errors go to stderr with a non-zero exit, and nothing prompts without a terminal.
 - Commands are noun-verb like GDAL's (`ftw data query`, `ftw infer run`), take an area as a place name or `xmin,ymin,xmax,ymax` (also as `--bbox` or `--place`), and pick the output format from the file suffix. Place names go through Nominatim with a User-Agent and a local cache, as its usage policy asks.
-- Progress bars go to stderr, only in a terminal. Library functions take an optional `progress(done, total)` callback and draw nothing themselves, so the TUI can show progress its own way.
+- Progress bars go to stderr, only in a terminal. Library functions take an optional `progress(done, total)` callback and draw nothing themselves.
 
 ## Install
 
@@ -17,7 +18,6 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 | `ftw-cli` | cyclopts, rich, duckdb, pyarrow, pillow | querying, exporting, and drawing field boundaries |
 | `ftw-cli[imagery]` | rasterio, pystac-client | crop-calendar scene selection and Sentinel-2 download |
 | `ftw-cli[inference]` | the above plus onnxruntime | running FTW models |
-| `ftw-cli[tui]` | textual, textual-image | the interactive TUI |
 
 ## Commands
 
@@ -28,7 +28,6 @@ Working now:
 - `ftw data query AREA [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
 - `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
-- `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
 - `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
@@ -39,7 +38,6 @@ Planned:
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
 - ftw-q (quarterly mosaics) and FTP (PlanetScope), which need their own imagery commands.
 - `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
-- TUI: imagery and inference screens as those commands land.
 - `ftw schema [command]`: a command's parameters as JSON Schema, for agents.
 
 ## Models
@@ -60,7 +58,7 @@ The ONNX models in `ftw infer run` match `ftw-tools inference run` with the same
 
 ## Viewing
 
-No Python library draws vector tiles in a terminal, so the map is an image. `render.py` draws the fields with Pillow, colored along the FTW green ramp by score and corrected for latitude, and the TUI shows it with textual-image: full resolution over the kitty or sixel graphics protocols, colored half-blocks elsewhere. The TUI draws at most the 20,000 largest fields so a large box stays responsive. `ftw view --web` will serve the 2nd Edition PMTiles and local files to a MapLibre page, which over SSH is one port forward.
+`ftw view` draws the fields to a PNG with Pillow, colored along the FTW green ramp by score and corrected for latitude, as a quick look that people and agents can open anywhere. Anything interactive is for QGIS, lonboard, or similar tools reading the GeoParquet. `ftw view --web` will serve the 2nd Edition PMTiles and local files to a MapLibre page, which over SSH is one port forward.
 
 ## Agents
 
@@ -72,8 +70,8 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 
 ## Milestones
 
-1. `data` query and export, `view`, the TUI, CI. (Done.)
-2. `imagery`, `models`, and ONNX `infer`. (Done.) TUI screens for them, and better field splitting.
+1. `data` query and export, `view`, CI. (Done.)
+2. `imagery`, `models`, ONNX `infer`, and field splitting with BoundaryVote. (Done.)
 3. `catalog`, `join catalog`, and `join sql`.
 4. `view --web`, `schema`, and `SKILL.md`.
 

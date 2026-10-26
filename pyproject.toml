@@ -35,10 +35,6 @@ optional-dependencies.inference = [
   "ftw-fbp[fast]>=0.1",
   "onnxruntime>=1.20",
 ]
-optional-dependencies.tui = [
-  "textual>=8.2",
-  "textual-image>=0.14",
-]
 scripts.ftw = "ftw_cli.cli:run"
 
 [tool.uv]

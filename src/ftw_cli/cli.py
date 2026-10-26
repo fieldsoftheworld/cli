@@ -6,7 +6,7 @@ from typing import Annotated
 from cyclopts import App, Parameter
 
 from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import AreaArg, YearArg, fail, need, parse_area
+from ftw_cli.cli_args import AreaArg, YearArg, fail, parse_area
 from ftw_cli.cli_infer import imagery, infer, models
 from ftw_cli.progress import bar, spinner
 
@@ -29,7 +29,6 @@ EXAMPLES = [
     ("", 'ftw data history "Beauce, France"'),
     ("", 'ftw view "Chartres, France" --out chartres.png'),
     ("Detect", 'ftw infer all "Poltava, Ukraine" --year 2024 --out-dir poltava'),
-    ("Browse", "ftw tui"),
 ]
 
 
@@ -157,16 +156,6 @@ def view(
         fields = ftw2e.fields(con, box, year, limit)
         render.render(fields, box, width).save(out)
     output.emit({"path": str(out), "fields": len(fields), "year": year})
-
-
-@app.command
-def tui():
-    """Browse field boundaries interactively. Needs the [tui] extra."""
-    try:
-        from ftw_cli.tui import main
-    except ImportError as e:
-        need("tui", e)
-    main()
 
 
 def run():
