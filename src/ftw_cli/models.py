@@ -47,41 +47,39 @@ DEFAULT_MODEL = "prue-ccby-b5"
 
 
 def cache_dir() -> Path:
-    return (
-        Path(os.environ.get("FTW_CACHE_DIR", Path.home() / ".cache" / "ftw-cli"))
-        / "models"
-    )
+    return Path(os.environ.get("FTW_CACHE_DIR", Path.home() / ".cache" / "ftw-cli"))
 
 
 def cached(name: str) -> Path | None:
     """The local copy of model ``name``, if it has been downloaded."""
-    path = cache_dir() / MODELS[name].url.rsplit("/", 1)[-1]
+    path = _path(name)
     return path if path.exists() else None
 
 
 def fetch(name: str, progress: Callable[[int, int | None], None] | None = None) -> Path:
     """Local path to model ``name``, downloading and verifying it on first use."""
-    if path := cached(name):
+    path = _path(name)
+    if path.exists():
         return path
-    model = MODELS[name]
-    path = cache_dir() / model.url.rsplit("/", 1)[-1]
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Download to a temp file and rename, so a concurrent reader never sees a partial file.
+    # Download beside the target and rename, so a concurrent reader never sees a partial file.
     with tempfile.NamedTemporaryFile(
         dir=path.parent, suffix=".partial", delete=False
     ) as tmp:
         digest = hashlib.sha256()
-        with urllib.request.urlopen(model.url) as response:
+        with urllib.request.urlopen(MODELS[name].url) as response:
             total = int(response.headers.get("Content-Length") or 0) or None
-            done = 0
             while chunk := response.read(1 << 20):
                 digest.update(chunk)
                 tmp.write(chunk)
-                done += len(chunk)
                 if progress:
-                    progress(done, total)
-    if digest.hexdigest() != model.sha256:
+                    progress(tmp.tell(), total)
+    if digest.hexdigest() != MODELS[name].sha256:
         os.remove(tmp.name)
         raise OSError(f"{name}: downloaded file does not match its sha256")
     os.replace(tmp.name, path)
     return path
+
+
+def _path(name: str) -> Path:
+    return cache_dir() / "models" / MODELS[name].url.rsplit("/", 1)[-1]

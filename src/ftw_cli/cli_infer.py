@@ -8,18 +8,13 @@ from cyclopts import App, Parameter, validators
 
 from ftw_cli import models as registry
 from ftw_cli import output
-from ftw_cli.cli_args import AreaArg, fail, need, parse_area
+from ftw_cli.cli_args import AreaArg, parse_area, require
 from ftw_cli.ftw2e import BBox
 from ftw_cli.progress import bar, spinner
 
-imagery = App(
-    name="imagery",
-    help="Find and download the planting and harvest Sentinel-2 scenes for an area.",
-)
+imagery = App(name="imagery", help="Find and download Sentinel-2 scenes for an area.")
 models = App(name="models", help="Released FTW models the CLI can run.")
-infer = App(
-    name="infer", help="Run FTW models and turn their output into field polygons."
-)
+infer = App(name="infer", help="Run FTW models and split their output into fields.")
 
 ModelName = Annotated[
     Literal[tuple(registry.MODELS)],  # type: ignore[valid-type]
@@ -33,9 +28,12 @@ Host = Annotated[
 ]
 SceneYear = Annotated[int, Parameter(help="Growing season year.")]
 BufferDays = Annotated[
-    int, Parameter(help="Search this many days either side of the crop calendar date.")
+    int, Parameter(help="Days either side of the crop calendar date.")
 ]
 CloudMax = Annotated[float, Parameter(help="Maximum scene cloud cover, in percent.")]
+InputTif = Annotated[
+    Path, Parameter(validator=validators.Path(exists=True, dir_okay=False))
+]
 
 
 @imagery.command
@@ -48,10 +46,8 @@ def search(
     cloud_cover_max: CloudMax = 20,
 ):
     """The least cloudy scenes near the start and end of the growing season over AREA."""
-    output.emit(
-        _search(parse_area(area), year, host, buffer_days, cloud_cover_max),
-        title="Scenes",
-    )
+    scenes = _find(parse_area(area), year, host, buffer_days, cloud_cover_max)
+    output.emit([asdict(s) for s in scenes], title="Scenes")
 
 
 @imagery.command
@@ -59,14 +55,12 @@ def download(
     area: AreaArg,
     *,
     year: SceneYear,
-    out: Annotated[
-        Path, Parameter(help="GeoTIFF to write: 8 bands, RGBN of each scene, 10 m.")
-    ],
+    out: Annotated[Path, Parameter(help="COG to write: RGBN of each scene, 10 m.")],
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Search for the two scenes, then stack them over AREA into one GeoTIFF."""
+    """Find the two scenes, then stack them over AREA into one COG."""
     output.emit(
         _download(parse_area(area), year, out, host, buffer_days, cloud_cover_max)
     )
@@ -74,81 +68,49 @@ def download(
 
 @models.command(name="list")
 def list_models():
-    """The models, with license and which one is the default."""
+    """The models, their licenses, and which is the default."""
     output.emit(
         [
             {
-                "name": n,
-                "default": n == registry.DEFAULT_MODEL,
-                "license": m.license,
-                "description": m.description,
+                "name": name,
+                "default": name == registry.DEFAULT_MODEL,
+                "cached": registry.cached(name) is not None,
+                "license": model.license,
+                "description": model.description,
             }
-            for n, m in registry.MODELS.items()
+            for name, model in registry.MODELS.items()
         ],
         title="FTW models",
     )
 
 
-@models.command
-def show(name: ModelName):
-    """Everything about one model, including its pinned download URL."""
-    cached = registry.cached(name)
-    output.emit(
-        {
-            "name": name,
-            **asdict(registry.MODELS[name]),
-            "cached": str(cached) if cached else None,
-        }
-    )
-
-
 @infer.command
 def run(
-    input: Annotated[
-        Path,
-        Parameter(
-            validator=validators.Path(exists=True, dir_okay=False),
-            help="Stacked GeoTIFF, as written by `ftw imagery download`.",
-        ),
-    ],
+    input: InputTif,
     *,
-    out: Annotated[
-        Path,
-        Parameter(help="GeoTIFF of field and boundary probabilities (uint8, p * 255)."),
-    ],
+    out: Annotated[Path, Parameter(help="COG of field and boundary probabilities.")],
     model: ModelName = registry.DEFAULT_MODEL,
-    patch_size: Annotated[
-        int | None,
-        Parameter(help="Pixels per patch. Defaults to 1024 or less for small inputs."),
-    ] = None,
+    patch_size: Annotated[int | None, Parameter(help="Pixels per patch.")] = None,
     batch_size: Annotated[int, Parameter(help="Patches per model call.")] = 4,
 ):
-    """Predict field and field-boundary probabilities for every pixel of INPUT."""
+    """Predict field and boundary probabilities for INPUT, from `ftw imagery download`."""
     output.emit(_run(input, out, model, patch_size, batch_size))
 
 
 @infer.command
 def polygonize(
-    input: Annotated[
-        Path,
-        Parameter(
-            validator=validators.Path(exists=True, dir_okay=False),
-            help="Probabilities GeoTIFF from `ftw infer run`.",
-        ),
-    ],
+    input: InputTif,
     *,
-    out: Annotated[Path, Parameter(help="GeoParquet to write, in EPSG:4326.")],
+    out: Annotated[Path, Parameter(help="fiboa GeoParquet to write.")],
     simplify: Annotated[
-        float, Parameter(help="Simplification tolerance in meters; 0 disables it.")
+        float, Parameter(help="Simplification tolerance in meters.")
     ] = 15,
-    min_size: Annotated[
-        float, Parameter(help="Drop fields smaller than this, in m².")
-    ] = 500,
+    min_size: Annotated[float, Parameter(help="Drop smaller fields, in m².")] = 500,
     max_size: Annotated[
-        float | None, Parameter(help="Drop fields larger than this, in m².")
+        float | None, Parameter(help="Drop larger fields, in m².")
     ] = None,
 ):
-    """Split INPUT into fields with BoundaryVote (fbp.FTW_2E) and write polygons."""
+    """Split INPUT, from `ftw infer run`, into fields with BoundaryVote."""
     output.emit(_polygonize(input, out, simplify, min_size, max_size))
 
 
@@ -158,18 +120,16 @@ def run_all(
     *,
     year: SceneYear,
     out_dir: Annotated[
-        Path,
-        Parameter(help="Directory for imagery.tif, scores.tif, and fields.parquet."),
+        Path, Parameter(help="Gets imagery.tif, scores.tif, fields.parquet.")
     ],
     model: ModelName = registry.DEFAULT_MODEL,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Download imagery for AREA, run MODEL on it, and polygonize the fields."""
+    """Download imagery for AREA, run MODEL on it, and split the result into fields."""
     box = parse_area(area)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    scenes = _download(
+    imagery_ = _download(
         box, year, out_dir / "imagery.tif", host, buffer_days, cloud_cover_max
     )
     scores = _run(out_dir / "imagery.tif", out_dir / "scores.tif", model, None, 4)
@@ -177,31 +137,16 @@ def run_all(
         out_dir / "scores.tif", out_dir / "fields.parquet", 15, 500, None
     )
     output.emit(
-        {"scenes": scenes["scenes"], "model": model, **scores, **fields}
-        | {"path": str(out_dir)}
+        {**scores, **fields, "scenes": imagery_["scenes"], "path": str(out_dir)}
     )
 
 
-def _search(
-    box: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float
-) -> list[dict]:
-    try:
-        from ftw_cli import imagery as s2
-    except ImportError as e:
-        need("imagery", e)
-    try:
-        with spinner("Finding scenes on the crop calendar"):
-            start, end = s2.season(box, year)
-            return [
-                {
-                    "window": window,
-                    "target_date": str(when),
-                    **asdict(s2.search(box, when, host, buffer_days, cloud_cover_max)),
-                }
-                for window, when in (("a", start), ("b", end))
-            ]
-    except (LookupError, ValueError, OSError) as e:
-        fail(str(e))
+def _find(box: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float):
+    require("imagery")
+    from ftw_cli import imagery as s2
+
+    with spinner("Finding scenes on the crop calendar"):
+        return s2.find(box, year, host, buffer_days, cloud_cover_max)
 
 
 def _download(
@@ -209,11 +154,7 @@ def _download(
 ) -> dict:
     from ftw_cli import imagery as s2
 
-    found = _search(box, year, host, buffer_days, cloud_cover_max)
-    scenes = [
-        s2.Scene(**{k: v for k, v in s.items() if k in s2.Scene.__dataclass_fields__})
-        for s in found
-    ]
+    scenes = _find(box, year, host, buffer_days, cloud_cover_max)
     with bar("Reading Sentinel-2 bands") as progress:
         return s2.download(scenes, box, out, host, progress)
 
@@ -221,29 +162,21 @@ def _download(
 def _run(
     input: Path, out: Path, model: str, patch_size: int | None, batch_size: int
 ) -> dict:
-    try:
-        from ftw_cli import infer as onnx
-    except ImportError as e:
-        need("inference", e)
-    try:
-        if not registry.cached(model):
-            with bar(f"Downloading {model}", unit="bytes") as progress:
-                registry.fetch(model, progress)
-        with bar(f"Running {model}") as progress:
-            return onnx.run(input, out, model, patch_size, batch_size, progress)
-    except (ValueError, OSError) as e:
-        fail(str(e))
+    require("inference")
+    from ftw_cli import infer as onnx
+
+    if not registry.cached(model):
+        with bar(f"Downloading {model}", unit="bytes") as progress:
+            registry.fetch(model, progress)
+    with bar(f"Running {model}") as progress:
+        return onnx.run(input, out, model, patch_size, batch_size, progress)
 
 
 def _polygonize(
     input: Path, out: Path, simplify: float, min_size: float, max_size: float | None
 ) -> dict:
-    try:
-        from ftw_cli import infer as onnx
-    except ImportError as e:
-        need("inference", e)
-    try:
-        with spinner("Splitting fields with BoundaryVote"):
-            return onnx.polygonize(input, out, simplify, min_size, max_size)
-    except (ValueError, OSError) as e:
-        fail(str(e))
+    require("inference")
+    from ftw_cli import infer as onnx
+
+    with spinner("Splitting fields with BoundaryVote"):
+        return onnx.polygonize(input, out, simplify, min_size, max_size)

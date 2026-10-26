@@ -20,7 +20,7 @@ def cache(tmp_path, monkeypatch):
         ("-93.7,41.95,-93.6,42.05", True),
         (" 1.55, 48.2 ,1.7,48.3 ", True),
         ("Ames, Iowa", False),
-        ("1,2,3", False),
+        ("1,2,3", True),  # malformed, but still a bbox, not a place
     ],
 )
 def test_is_bbox(text, expected):
@@ -71,13 +71,12 @@ def test_geocode_widens_a_village_to_a_useful_box(monkeypatch):
     assert box.xmin < 1.6 and box.xmax > 1.601
 
 
-def test_unknown_place_fails_cleanly(monkeypatch, capsys):
+def test_unknown_place_raises(monkeypatch):
     monkeypatch.setattr(
         places.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(b"[]")
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(LookupError, match="no place matches"):
         parse_area("Nowhere At All")
-    assert "could not find 'Nowhere At All'" in capsys.readouterr().err
 
 
 def test_parse_area_takes_numbers_without_geocoding(monkeypatch):

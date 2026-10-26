@@ -13,9 +13,9 @@ from ftw_cli import fiboa
 
 BASE_URL = "https://data.source.coop/ftw/global-data-2e"
 VECTOR_INDEX = f"{BASE_URL}/index/vector.parquet"
-
-# GDAL drivers DuckDB spatial uses for non-Parquet exports, keyed by file suffix.
 EXPORT_DRIVERS = {".geojson": "GeoJSON", ".gpkg": "GPKG", ".fgb": "FlatGeobuf"}
+
+Progress = Callable[[int, int | None], None]
 
 
 @dataclass(frozen=True)
@@ -31,16 +31,17 @@ class BBox:
         parts = text.split(",")
         if len(parts) != 4:
             raise ValueError(f"bbox needs 4 comma-separated numbers, got {text!r}")
-        bbox = cls(*(float(p) for p in parts))
-        if not (-180 <= bbox.xmin < bbox.xmax <= 180):
+        box = cls(*(float(p) for p in parts))
+        if not (
+            -180 <= box.xmin < box.xmax <= 180 and -90 <= box.ymin < box.ymax <= 90
+        ):
             raise ValueError(
-                f"bbox longitudes must satisfy -180 <= xmin < xmax <= 180: {text!r}"
+                f"bbox must be xmin<xmax in -180..180, ymin<ymax in -90..90: {text!r}"
             )
-        if not (-90 <= bbox.ymin < bbox.ymax <= 90):
-            raise ValueError(
-                f"bbox latitudes must satisfy -90 <= ymin < ymax <= 90: {text!r}"
-            )
-        return bbox
+        return box
+
+    def __str__(self) -> str:
+        return ",".join(f"{v:g}" for v in vars(self).values())
 
     def overlaps(self, prefix: str = "") -> str:
         """SQL predicate for rows whose ``{prefix}xmin..ymax`` bounds intersect this box."""
@@ -49,6 +50,9 @@ class BBox:
             f"{p}xmax >= {self.xmin} and {p}xmin <= {self.xmax} "
             f"and {p}ymax >= {self.ymin} and {p}ymin <= {self.ymax}"
         )
+
+    def envelope(self) -> str:
+        return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
 
     def area_km2(self) -> float:
         lat = math.radians((self.ymin + self.ymax) / 2)
@@ -59,15 +63,11 @@ class BBox:
             * math.cos(lat)
         )
 
-    def envelope(self) -> str:
-        return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
-
 
 def connect() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial;")
-    con.execute("SET geometry_always_xy = true")
-    con.execute("SET enable_progress_bar = false")
+    con.execute("SET geometry_always_xy = true; SET enable_progress_bar = false")
     # DuckDB 2.0.0 crashes ("Vector::Reference used on vector of different type")
     # on ORDER BY ... LIMIT over a filter on the bbox struct with this optimizer on.
     con.execute("SET disabled_optimizers = 'late_materialization'")
@@ -76,28 +76,44 @@ def connect() -> duckdb.DuckDBPyConnection:
 
 def info(con: duckdb.DuckDBPyConnection) -> list[dict]:
     """Per-year totals from the vector index."""
-    rows = con.execute(
-        f"""
-        select year, count(*) as files, sum(n_parcels) as parcels,
-               round(sum(area_km2)) as area_km2, round(sum(size_bytes) / 1e9, 1) as size_gb
-        from '{VECTOR_INDEX}' group by year order by year
-        """
+    return _records(
+        con.execute(
+            f"""
+            select year, count(*) as files, sum(n_parcels) as parcels,
+                   round(sum(area_km2)) as area_km2, round(sum(size_bytes) / 1e9, 1) as size_gb
+            from '{VECTOR_INDEX}' group by year order by year
+            """
+        )
     )
-    return _records(rows)
 
 
 def years(con: duckdb.DuckDBPyConnection) -> list[int]:
-    return [
-        y
-        for (y,) in con.execute(
-            f"select distinct year from '{VECTOR_INDEX}' order by year"
-        ).fetchall()
-    ]
+    query = f"select distinct year from '{VECTOR_INDEX}' order by year"
+    return [y for (y,) in con.execute(query).fetchall()]
 
 
-def history(
-    bbox: BBox, progress: Callable[[int, int | None], None] | None = None
-) -> list[dict]:
+def hrefs(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[str]:
+    """The partition files a query over ``bbox`` and ``year`` reads."""
+    query = f"select href from '{VECTOR_INDEX}' where year = ? and {bbox.overlaps()}"
+    return [h for (h,) in con.execute(query, [year]).fetchall()]
+
+
+def summarize(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> dict:
+    files = hrefs(con, bbox, year)
+    row = (0, 0, None)
+    if files:
+        row = con.execute(
+            f"""
+            select count(*), round(sum("metrics:area") / 1e4, 1), round(avg(score), 1)
+            from read_parquet(?) where {_in_bbox(bbox)}
+            """,
+            [files],
+        ).fetchone()
+    count, area, score = row or (0, 0, None)
+    return {"year": year, "fields": count, "area_ha": area or 0, "mean_score": score}
+
+
+def history(bbox: BBox, progress: Progress | None = None) -> list[dict]:
     """``summarize`` for every year, each on its own connection so the years run at once."""
     every = years(connect())
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -108,96 +124,57 @@ def history(
     return [f.result() for f in futures]
 
 
-def latest_year(con: duckdb.DuckDBPyConnection) -> int:
-    return con.execute(f"select max(year) from '{VECTOR_INDEX}'").fetchone()[0]
-
-
-def files(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[dict]:
-    """Index rows for the partition files a query over ``bbox`` and ``year`` would read."""
-    rows = con.execute(
-        f"""
-        select year, zone, href, n_parcels, round(size_bytes / 1e9, 2) as size_gb
-        from '{VECTOR_INDEX}' where year = ? and {bbox.overlaps()} order by zone
-        """,
-        [year],
-    )
-    return _records(rows)
-
-
-def summarize(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> dict:
-    hrefs = [f["href"] for f in files(con, bbox, year)]
-    summary = {"year": year, "bbox": list(vars(bbox).values()), "files": len(hrefs)}
-    if not hrefs:
-        return summary | {"fields": 0, "area_ha": 0, "mean_score": None}
-    count, area, score = con.execute(
-        f"""
-        select count(*), round(sum("metrics:area") / 1e4, 1), round(avg(score), 1)
-        from read_parquet(?) where {_in_bbox(bbox)}
-        """,
-        [hrefs],
-    ).fetchone()
-    return summary | {"fields": count, "area_ha": area or 0, "mean_score": score}
-
-
 def fields(
     con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, limit: int
 ) -> list[dict]:
     """Up to ``limit`` fields in ``bbox`` with GeoJSON geometry, largest first."""
-    hrefs = [f["href"] for f in files(con, bbox, year)]
-    if not hrefs:
+    files = hrefs(con, bbox, year)
+    if not files:
         return []
-    rows = con.execute(
-        f"""
-        select id, round("metrics:area" / 1e4, 2) as area_ha, score,
-               ST_AsGeoJSON(geometry) as geometry
-        from read_parquet(?) where {_in_bbox(bbox)}
-        order by "metrics:area" desc limit {int(limit)}
-        """,
-        [hrefs],
+    rows = _records(
+        con.execute(
+            f"""
+            select id, round("metrics:area" / 1e4, 2) as area_ha, score,
+                   ST_AsGeoJSON(geometry) as geometry
+            from read_parquet(?) where {_in_bbox(bbox)}
+            order by "metrics:area" desc limit {int(limit)}
+            """,
+            [files],
+        )
     )
-    records = _records(rows)
-    for r in records:
-        r["geometry"] = json.loads(r["geometry"])
-    return records
+    return [r | {"geometry": json.loads(r["geometry"])} for r in rows]
 
 
 def export(
     con: duckdb.DuckDBPyConnection, bbox: BBox, year: int, out: Path, limit: int | None
 ) -> dict:
-    """Write the fields intersecting ``bbox`` to ``out``; the format follows its suffix.
+    """Write the fields in ``bbox`` to ``out`` in the format its suffix names.
 
     ``.parquet`` is fiboa GeoParquet with the 2nd Edition's own collection metadata.
     """
-    hrefs = [f["href"] for f in files(con, bbox, year)]
-    if not hrefs:
-        raise LookupError(f"no FTW {year} fields intersect {bbox}")
     suffix = out.suffix.lower()
     if suffix not in (".parquet", *EXPORT_DRIVERS):
-        supported = ", ".join([".parquet", *EXPORT_DRIVERS])
         raise ValueError(
-            f"unsupported output format {suffix!r}; use one of {supported}"
+            f"unsupported format {suffix!r}; use .parquet, {', '.join(EXPORT_DRIVERS)}"
         )
-    limit_sql = f"limit {int(limit)}" if limit else ""
+    files = hrefs(con, bbox, year)
+    if not files:
+        raise LookupError(f"no FTW {year} fields intersect {bbox}")
     query = f"""
         select * exclude (bbox, zone) from read_parquet(?)
-        where {_in_bbox(bbox)} {limit_sql}
+        where {_in_bbox(bbox)} {f"limit {int(limit)}" if limit else ""}
     """
     if suffix == ".parquet":
-        row = con.execute(
+        # fetchall: DuckDB 2.0 refuses new work while a result is still open.
+        [(meta,)] = con.execute(
             "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
-            [hrefs[0]],
-        ).fetchone()
-        if row is None:
-            raise LookupError(f"{hrefs[0]} has no fiboa collection metadata")
-        count = fiboa.copy(con, query, out, json.loads(row[0]), [hrefs])
+            [files[0]],
+        ).fetchall()
+        count = fiboa.copy(con, query, out, json.loads(meta), [files])
     else:
-        driver = EXPORT_DRIVERS[suffix]
-        row = con.execute(
-            f"copy ({query}) to '{_quote(out)}' (FORMAT gdal, DRIVER '{driver}')",
-            [hrefs],
-        ).fetchone()
-        count = row[0] if row else 0
-    return {"path": str(out), "fields": count, "files_read": len(hrefs)}
+        sql = f"copy ({query}) to '{_quote(out)}' (FORMAT gdal, DRIVER '{EXPORT_DRIVERS[suffix]}')"
+        (count,) = con.execute(sql, [files]).fetchone() or (0,)
+    return {"path": str(out), "fields": count}
 
 
 def _in_bbox(bbox: BBox) -> str:

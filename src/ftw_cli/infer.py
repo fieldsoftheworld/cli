@@ -27,7 +27,7 @@ def run(
     batch_size: int = 4,
     progress: Callable[[int, int | None], None] | None = None,
 ) -> dict:
-    """Write field and boundary probabilities for ``input`` to ``out`` as a 2-band uint8 GeoTIFF."""
+    """Write field and boundary probabilities (uint8, p * 255) for ``input`` to a COG."""
     import onnxruntime as ort
 
     spec = models.MODELS[model]
@@ -90,15 +90,7 @@ def run(
         },
         descriptions=BANDS,
     )
-    field, boundary = scores.astype(np.int16)
-    return {
-        "path": str(out),
-        "model": model,
-        "field_fraction": round(
-            float(((field > boundary) & (2 * field + boundary > 255)).mean()), 3
-        ),
-        "patches": len(windows),
-    }
+    return {"path": str(out), "model": model, "patches": len(windows)}
 
 
 def polygonize(
@@ -108,11 +100,9 @@ def polygonize(
     min_size: float = 500.0,
     max_size: float | None = None,
 ) -> dict:
-    """Split a ``run`` output into fields with BoundaryVote and write fiboa GeoParquet.
+    """Split a ``run`` output into fields with ``fbp.FTW_2E`` and write fiboa GeoParquet.
 
-    Fields come from ``fbp.FTW_2E``, the setting of the FTW 2nd Edition, so touching fields
-    stay separate where the predicted boundary divides them. ``simplify`` is a tolerance in
-    meters, ``min_size`` and ``max_size`` are areas in m².
+    ``simplify`` is a tolerance in meters; ``min_size`` and ``max_size`` are areas in m².
     """
     with rasterio.open(input) as src:
         if not src.crs.is_projected:
@@ -153,22 +143,16 @@ def polygonize(
         from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
         where area >= {float(min_size)} {max_sql}
     """
-    model = tags.get("FTW_MODEL", "an FTW model")
+    details = (
+        f"{tags.get('FTW_MODEL', 'an FTW model')} on Sentinel-2 with ftw-cli {__version__}, "
+        f"fields split with BoundaryVote (fbp.FTW_2E, ftw-fbp {version('ftw-fbp')})"
+    )
     meta = fiboa.collection(
         "ftw-cli",
-        **{
-            "determination:method": "auto-imagery",
-            "determination:details": (
-                f"{model} on Sentinel-2 with ftw-cli {__version__}, fields split "
-                f"with BoundaryVote (fbp.FTW_2E, ftw-fbp {version('ftw-fbp')})"
-            ),
-        },
-        **(
-            {"determination:datetime": when}
-            if (when := _iso(tags.get("TIFFTAG_DATETIME")))
-            else {}
-        ),
+        **{"determination:method": "auto-imagery", "determination:details": details},
     )
+    if when := _iso(tags.get("TIFFTAG_DATETIME")):
+        meta["determination:datetime"] = when
     count = fiboa.copy(con, query, out, meta)
     return {"path": str(out), "fields": count, "crs": "EPSG:4326"}
 
@@ -239,6 +223,6 @@ def _paste(scores: np.ndarray, pred: np.ndarray, w: Window, pad: int) -> None:
 
 def _iso(stamp: str | None) -> str | None:
     """``2024:11:01 17:03:49`` (TIFFTAG_DATETIME) to ``2024-11-01T17:03:49Z``."""
-    if not stamp or len(stamp) < 19:
-        return None
-    return f"{stamp[:4]}-{stamp[5:7]}-{stamp[8:10]}T{stamp[11:19]}Z"
+    if stamp and len(stamp) >= 19:
+        return f"{stamp[:4]}-{stamp[5:7]}-{stamp[8:10]}T{stamp[11:19]}Z"
+    return None
