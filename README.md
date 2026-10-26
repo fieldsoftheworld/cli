@@ -37,18 +37,18 @@ fields  2017 █▅█▇▁▃▄▄▄ 2025  -14% since 2017
 ## Detect fields on new imagery
 
 ```sh
-ftw infer all "Ames, Iowa" --year 2024 --out-dir ames
+ftw detect "Ames, Iowa" --year 2024 --out ames.gpkg
 ```
 
-This picks the least cloudy Sentinel-2 scenes near planting and harvest from the crop calendar, downloads them, runs a PRUE model through onnxruntime (on a GPU if there is one), and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`, the setting behind the 2nd Edition). The steps are also separate commands:
+This picks the least cloudy Sentinel-2 scenes near planting and harvest from the crop calendar, downloads them, runs a PRUE model through onnxruntime (on a GPU if there is one), and splits the result into fields with BoundaryVote ([ftw-fbp](https://pypi.org/project/ftw-fbp/)'s `FTW_2E`, the setting behind the 2nd Edition). `--out` takes `.parquet`, `.gpkg`, `.geojson`, or `.fgb`; Parquet is fiboa GeoParquet with the model and BoundaryVote setting in its metadata, which the other formats have no place for. Output is in EPSG:4326 unless you pass `--crs`, either an EPSG code such as `3857` or `utm` to keep the imagery's UTM meters; `ftw data query --out` takes `--crs` too, where `utm` is the zone at the area's center. The imagery and probabilities are deleted afterwards unless you pass `--keep DIR`. The steps are also separate commands:
 
 ```sh
 ftw imagery download "Ames, Iowa" --year 2024 --out ames.tif
-ftw infer run ames.tif --out scores.tif --model prue-ccby-b7
-ftw infer polygonize scores.tif --out fields.parquet
+ftw predict ames.tif --out scores.tif --model prue-ccby-b7
+ftw polygonize scores.tif --out fields.parquet
 ```
 
-`ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The imagery and the field and boundary probabilities are Cloud Optimized GeoTIFFs, and the fields are fiboa GeoParquet with the model and BoundaryVote setting recorded in the file's metadata. CI checks sample outputs with `fiboa validate` and `rio cogeo validate`, so they open in QGIS, lonboard, GDAL, and the fiboa tools.
+`ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The imagery and the field and boundary probabilities are Cloud Optimized GeoTIFFs. CI checks sample outputs with `fiboa validate` and `rio cogeo validate`, so they open in QGIS, lonboard, GDAL, and the fiboa tools.
 
 ## For scripts and agents
 

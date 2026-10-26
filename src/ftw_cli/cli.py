@@ -10,8 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import AreaArg, YearArg, parse_area
-from ftw_cli.cli_infer import imagery, infer, models
+from ftw_cli.cli_args import AreaArg, CrsArg, YearArg, parse_area
+from ftw_cli.cli_detect import detect, imagery, models, polygonize, predict
 from ftw_cli.progress import bar, spinner
 
 app = App(
@@ -20,15 +20,15 @@ app = App(
     help="Fields of The World: field boundaries for people and agents.",
 )
 data = App(name="data", help="Query the FTW Global Data 2nd Edition in place.")
-for group in (data, imagery, models, infer):
-    app.command(group)
+for command in (detect, predict, polygonize, data, imagery, models):
+    app.command(command)
 app.register_install_completion_command()
 
 EXAMPLES = [
     ("Explore", 'ftw data query "Story County, Iowa"'),
     ("", 'ftw data history "Beauce, France"'),
     ("", 'ftw view "Chartres, France" --out chartres.png'),
-    ("Detect", 'ftw infer all "Poltava, Ukraine" --year 2024 --out-dir poltava'),
+    ("Detect", 'ftw detect "Poltava, Ukraine" --year 2024 --out poltava.gpkg'),
 ]
 # Errors that are the input's or the network's fault: one line, no traceback.
 EXPECTED = (LookupError, ValueError, OSError, duckdb.Error)
@@ -91,6 +91,7 @@ def query(
     limit: Annotated[
         int | None, Parameter(help="Write at most this many fields.")
     ] = None,
+    crs: CrsArg = "4326",
 ):
     """Summarize the fields in AREA, or write them to a file with --out."""
     box = parse_area(area)
@@ -98,7 +99,7 @@ def query(
     year = year or ftw2e.years(con)[-1]
     if out:
         with spinner(f"Writing FTW {year} fields to {out}"):
-            result = ftw2e.export(con, box, year, out, limit)
+            result = ftw2e.export(con, box, year, out, limit, crs)
     else:
         with spinner(f"Reading FTW {year} fields"):
             result = ftw2e.summarize(con, box, year)
