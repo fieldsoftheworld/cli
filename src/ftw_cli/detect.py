@@ -28,15 +28,12 @@ def predict(
     progress: Callable[[int, int | None], None] | None = None,
 ) -> dict:
     """Write field and boundary probabilities (uint8, p * 255) for ``input`` to a COG."""
-    import onnxruntime as ort
-
     spec = models.MODELS[model]
-    providers = [
-        p
-        for p in ("CUDAExecutionProvider", "CPUExecutionProvider")
-        if p in ort.get_available_providers()
-    ]
-    session = ort.InferenceSession(str(models.fetch(model)), providers=providers)
+    if spec.imagery != "scenes":
+        raise ValueError(
+            f"{model} runs on quarterly mosaics; use `ftw detect --model {model}`"
+        )
+    session = open_session(model)
     input_name = session.get_inputs()[0].name
 
     with rasterio.open(input) as src:
@@ -117,11 +114,52 @@ def polygonize(
                 f"{input} has {src.count} bands; expected field and boundary "
                 "probabilities from `ftw predict`"
             )
-        field, boundary = src.read().astype(np.float32) / 255
+        scores = src.read()
         native = src.crs.to_string()
         tags = src.tags()
         transform = src.transform
     target = vectors.crs(crs, utm=native)
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
+    split_into(
+        con, scores, transform, native, target, input.stem, simplify, min_size, max_size
+    )
+    meta = collection(tags.get("FTW_MODEL", "an FTW model"), "Sentinel-2")
+    if when := _iso(tags.get("TIFFTAG_DATETIME")):
+        meta["determination:datetime"] = when
+    count = vectors.write(con, "select * from fields", out, meta, crs=target)
+    return {"path": str(out), "fields": count, "crs": target}
+
+
+def open_session(model: models.ModelName):
+    """An onnxruntime session for ``model``, on a GPU when onnxruntime has one."""
+    import onnxruntime as ort
+
+    providers = [
+        p
+        for p in ("CUDAExecutionProvider", "CPUExecutionProvider")
+        if p in ort.get_available_providers()
+    ]
+    return ort.InferenceSession(str(models.fetch(model)), providers=providers)
+
+
+def split_into(
+    con: duckdb.DuckDBPyConnection,
+    scores: np.ndarray,
+    transform,
+    native: str,
+    target: str,
+    prefix: str,
+    simplify: float = 15.0,
+    min_size: float = 500.0,
+    max_size: float | None = None,
+    keep: str = "true",
+) -> None:
+    """Split uint8 field and boundary ``scores`` with ``fbp.FTW_2E`` into table ``fields``.
+
+    ``keep`` is an SQL predicate over ``geom`` in the ``native`` CRS; ids are ``prefix-n``.
+    """
+    field, boundary = scores.astype(np.float32) / 255
     prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
     del field, boundary
     instances = run_windowed(
@@ -135,30 +173,36 @@ def polygonize(
         json.dumps(g)
         for g, _ in shapes(instances, mask=instances > 0, transform=transform)
     ]
-
-    con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
-    con.execute("create table shapes as select unnest(?) as g", [geoms])
-    max_sql = f"and area <= {float(max_size)}" if max_size else ""
-    query = f"""
-        select concat('{_sql(input.stem)}-', row_number() over ()) as id,
-               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}') as geometry,
-               area::float as "metrics:area", ST_Perimeter(geom)::float as "metrics:perimeter"
-        from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
-        where area >= {float(min_size)} {max_sql}
-    """
-    details = (
-        f"{tags.get('FTW_MODEL', 'an FTW model')} on Sentinel-2 with ftw-cli {__version__}, "
-        f"fields split with BoundaryVote (fbp.FTW_2E, ftw-fbp {version('ftw-fbp')})"
+    con.execute(
+        "create or replace temp table shapes as select unnest(?::varchar[]) as g",
+        [geoms],
     )
-    meta = fiboa.collection(
+    con.execute(
+        'create table if not exists fields (id varchar, geometry geometry, "metrics:area" float, '
+        '"metrics:perimeter" float)'
+    )
+    max_sql = f"and area <= {float(max_size)}" if max_size else ""
+    con.execute(
+        f"""
+        insert into fields
+        select concat('{_sql(prefix)}-', row_number() over ()),
+               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}'),
+               area::float, ST_Perimeter(geom)::float
+        from (select ST_GeomFromGeoJSON(g) as geom, ST_Area(ST_GeomFromGeoJSON(g)) as area from shapes)
+        where area >= {float(min_size)} {max_sql} and {keep}
+        """
+    )
+
+
+def collection(model: str, imagery: str) -> dict:
+    details = (
+        f"{model} on {imagery} with ftw-cli {__version__}, fields split with BoundaryVote "
+        f"(fbp.FTW_2E, ftw-fbp {version('ftw-fbp')})"
+    )
+    return fiboa.collection(
         "ftw-cli",
         **{"determination:method": "auto-imagery", "determination:details": details},
     )
-    if when := _iso(tags.get("TIFFTAG_DATETIME")):
-        meta["determination:datetime"] = when
-    count = vectors.write(con, query, out, meta, crs=target)
-    return {"path": str(out), "fields": count, "crs": target}
 
 
 def _sql(text: str) -> str:

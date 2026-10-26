@@ -60,17 +60,26 @@ def detect(
     model: ModelName = registry.DEFAULT_MODEL,
     keep: Annotated[
         Path | None,
-        Parameter(help="Keep imagery.tif and scores.tif in this directory."),
+        Parameter(
+            help="Keep the rasters in this directory; with ftw-q, a rerun reuses their scores."
+        ),
     ] = None,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Find fields in AREA: download imagery for YEAR, run MODEL, split into polygons."""
+    """Find fields in AREA: get imagery for YEAR, run MODEL, split into polygons.
+
+    ftw-q, the default, runs on the year's quarterly mosaics tile by tile as the 2nd Edition
+    was made; the PRUE models run on two scenes picked from the crop calendar.
+    """
     vectors.check(out)
     if crs.lower() != "utm":
         vectors.crs(crs, utm="")
     box = parse_area(area)
+    if registry.MODELS[model].imagery == "mosaics":
+        output.emit(_detect_tiles(box, year, out, model, crs, keep))
+        return
     with tempfile.TemporaryDirectory() as tmp:
         work = keep or Path(tmp)
         scenes = _download(
@@ -155,6 +164,70 @@ def list_models():
         ],
         title="FTW models",
     )
+
+
+def _detect_tiles(
+    box: BBox,
+    year: int,
+    out: Path,
+    model: registry.ModelName,
+    crs: str,
+    keep: Path | None,
+) -> dict:
+    require("inference")
+    from ftw_cli import detect as onnx
+    from ftw_cli import ftw2e, mosaics, quarterly
+
+    con = ftw2e.connect()
+    with spinner("Finding quarterly mosaic tiles"):
+        parts = [
+            p
+            for t in mosaics.tiles(con, box, year)
+            if (p := mosaics.locate(t, year, box))
+        ]
+    if not parts:
+        raise LookupError(f"no quarterly mosaic tile overlaps {box}")
+    if not registry.cached(model):
+        with bar(f"Downloading {model}", unit="bytes") as progress:
+            registry.fetch(model, progress)
+    session = onnx.open_session(model)
+    # utm writes the whole output in one zone: the first tile's.
+    target = vectors.crs(crs, utm=parts[0].crs)
+    for i, part in enumerate(parts, 1):
+        label = f"{part.tile.key} ({i}/{len(parts)})"
+        path = keep / f"{part.tile.key}.tif" if keep else None
+        scores = mosaics.kept(path, part, model) if path else None
+        if scores is None:
+            with bar(f"Reading {label}") as progress:
+                stack = mosaics.read(part, progress)
+            with bar(f"Running {model} on {label}") as progress:
+                scores = quarterly.predict(stack, session, progress=progress)
+            if path:
+                mosaics.save(path, scores, part, model)
+        inside = f"ST_Intersects(ST_Transform(geom, '{part.crs}', 'EPSG:4326'), {box.envelope()})"
+        with spinner(f"Splitting fields on {label}"):
+            onnx.split_into(
+                con,
+                scores,
+                part.scores_transform,
+                part.crs,
+                target,
+                part.tile.key,
+                keep=f"{mosaics.owned(part)} and {inside}",
+            )
+    meta = onnx.collection(model, f"Sentinel-2 quarterly mosaics {year}")
+    meta["determination:datetime"] = f"{year}-01-01T00:00:00Z"
+    count = vectors.write(con, "select * from fields", out, meta, crs=target)
+    tiles = [p.tile.key for p in parts]
+    kept = {"rasters": str(keep)} if keep else {}
+    return {
+        "path": str(out),
+        "fields": count,
+        "crs": target,
+        "model": model,
+        "tiles": tiles,
+        **kept,
+    }
 
 
 def _find(box: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float):
