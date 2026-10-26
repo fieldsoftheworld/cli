@@ -11,7 +11,6 @@ from typing import Literal
 from ftw_cli.progress import Progress
 
 PRUE_CCBY = "https://huggingface.co/fieldsoftheworld/ftw-prue-ccby/resolve/ffe4452768e1054b1d7c2ab39b84b4170f90c7cf/"
-FTW_Q = "https://huggingface.co/fieldsoftheworld/ftw-q/resolve/f5aecca0ecd789ccdaf4a9844e2ed0a600a358ee/"
 
 
 @dataclass(frozen=True)
@@ -24,21 +23,10 @@ class Model:
     normalization: float = 3000.0
     # Upsampling applied before the model; FTW's Sentinel-2 models expect 2 (10 m to 5 m).
     resize_factor: int = 2
-    # "scenes": two Sentinel-2 L2A scenes from the crop calendar. "mosaics": the year's four
-    # quarterly cloudless mosaics, tile by tile, as the 2nd Edition was made.
-    imagery: Literal["scenes", "mosaics"] = "scenes"
 
 
-ModelName = Literal["ftw-q", "prue-ccby-b3", "prue-ccby-b5", "prue-ccby-b7"]
+ModelName = Literal["prue-ccby-b3", "prue-ccby-b5", "prue-ccby-b7"]
 MODELS: dict[ModelName, Model] = {
-    "ftw-q": Model(
-        FTW_Q + "ftw-q-unet-efb3.onnx",
-        "2a24bb9207fce358fc9305fab4e8121fea87ce14fd91ee8644cd5069bf4ceaf4",
-        "U-Net, EfficientNet-B3, on a year of quarterly mosaics, tiled as the 2nd Edition.",
-        "CC-BY-4.0",
-        resize_factor=4,
-        imagery="mosaics",
-    ),
     "prue-ccby-b3": Model(
         PRUE_CCBY + "prue_efnetb3_ccby-b35d59a6.onnx",
         "37f8d087147bb08a2c9ef5c46e7ec4d720d740aa24ccef2eee242243149dd5df",
@@ -58,7 +46,7 @@ MODELS: dict[ModelName, Model] = {
         "CC-BY-4.0",
     ),
 }
-DEFAULT_MODEL: ModelName = "ftw-q"
+DEFAULT_MODEL: ModelName = "prue-ccby-b5"
 
 
 def cache_dir() -> Path:

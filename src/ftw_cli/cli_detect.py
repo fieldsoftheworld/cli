@@ -59,25 +59,21 @@ def detect(
     model: ModelName = registry.DEFAULT_MODEL,
     keep: Annotated[
         Path | None,
-        Parameter(help="Keep rasters here; ftw-q reruns reuse them."),
+        Parameter(help="Keep the imagery and probabilities here."),
     ] = None,
     host: Host = "mspc",
     buffer_days: BufferDays = 14,
     cloud_cover_max: CloudMax = 20,
 ):
-    """Detect fields in AREA for YEAR.
+    """Detect fields in AREA from Sentinel-2 scenes near YEAR's planting and harvest.
 
-    ftw-q runs on the year's quarterly mosaics, tile by tile, as the 2nd Edition was
-    made. The PRUE models run on two scenes from the crop calendar (--host,
-    --buffer-days, --cloud-cover-max).
+    The season comes from the crop calendar. For the 2nd Edition's fields (2017-2025),
+    made with the quarterly model, use `ftw data query`.
     """
     vectors.check(out)
     if crs.lower() != "utm":
         vectors.crs(crs, utm="")
     box = parse_area(area)
-    if registry.MODELS[model].imagery == "mosaics":
-        output.emit(_detect_tiles(box, year, out, model, crs, keep, min_area, max_area))
-        return
     with tempfile.TemporaryDirectory() as tmp:
         work = keep or Path(tmp)
         scenes = _download(
@@ -162,77 +158,6 @@ def list_models():
     )
 
 
-def _fetch(model: registry.ModelName) -> None:
-    if not registry.cached(model):
-        with bar(f"Downloading {model}", unit="bytes") as progress:
-            registry.fetch(model, progress)
-
-
-def _detect_tiles(
-    box: BBox,
-    year: int,
-    out: Path,
-    model: registry.ModelName,
-    crs: str,
-    keep: Path | None,
-    min_area: float | None,
-    max_area: float | None,
-) -> dict:
-    require("inference")
-    from ftw_cli import inference, mosaics, quarterly
-
-    con = vectors.connect()
-    with spinner("Finding quarterly mosaic tiles"):
-        parts = [
-            p
-            for t in mosaics.tiles(con, box, year)
-            if (p := mosaics.locate(t, year, box))
-        ]
-    if not parts:
-        raise LookupError(f"no quarterly mosaic tile overlaps {box}")
-    _fetch(model)
-    session = inference.open_session(model)
-    # utm writes the whole output in the first tile's zone.
-    target = vectors.crs(crs, utm=parts[0].crs)
-    for i, part in enumerate(parts, 1):
-        label = f"{part.tile.key} ({i}/{len(parts)})"
-        path = keep / f"{part.tile.key}.tif" if keep else None
-        scores = mosaics.kept(path, part, model) if path else None
-        if scores is None:
-            with bar(f"Reading {label}") as progress:
-                stack = mosaics.read(part, progress)
-            with bar(f"Running {model} on {label}") as progress:
-                scores = quarterly.predict(stack, session, progress=progress)
-            if path:
-                mosaics.save(path, scores, part, model)
-        inside = f"ST_Intersects(ST_Transform(geom, '{part.crs}', 'EPSG:4326'), {box.envelope()})"
-        with spinner(f"Splitting fields on {label}"):
-            inference.split_into(
-                con,
-                scores,
-                part.scores_transform,
-                part.crs,
-                target,
-                part.tile.key,
-                min_area=min_area,
-                max_area=max_area,
-                keep=f"{mosaics.owned(part)} and {inside}",
-            )
-    meta = inference.collection(model, f"Sentinel-2 quarterly mosaics {year}")
-    meta["determination:datetime"] = f"{year}-01-01T00:00:00Z"
-    count = vectors.write(con, "select * from fields", out, meta, crs=target)
-    kept = {"rasters": str(keep)} if keep else {}
-    tiles = [p.tile.key for p in parts]
-    return {
-        "path": str(out),
-        "fields": count,
-        "crs": target,
-        "model": model,
-        "tiles": tiles,
-        **kept,
-    }
-
-
 def _find(box: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float):
     require("imagery")
     from ftw_cli import imagery as s2
@@ -261,7 +186,9 @@ def _predict(
     require("inference")
     from ftw_cli import inference
 
-    _fetch(model)
+    if not registry.cached(model):
+        with bar(f"Downloading {model}", unit="bytes") as progress:
+            registry.fetch(model, progress)
     with bar(f"Running {model}") as progress:
         return inference.predict(input, out, model, patch_size, batch_size, progress)
 

@@ -13,7 +13,7 @@ def test_schema_describes_commands_as_typed():
     assert detect["required"] == ["area", "year", "out"]
     assert detect["positional"] == ["area"]
     model = detect["properties"]["model"]
-    assert model["default"] == "ftw-q" and "prue-ccby-b5" in model["enum"]
+    assert model["default"] == "prue-ccby-b5" and "prue-ccby-b5" in model["enum"]
     assert detect["properties"]["keep"]["type"] == ["string", "null"]
 
 

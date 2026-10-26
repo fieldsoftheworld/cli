@@ -24,7 +24,7 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 
 - `cli.py` wires the app; `cli_data.py` (`data`, `view`), `cli_detect.py` (`detect`, `predict`, `polygonize`, `imagery`, `models`), and `cli_fields.py` (`compare`, `stats`) hold the commands, and `cli_args.py` the arguments they share. Commands parse arguments and show progress; the work is in the library modules.
 - `areas.py`: `BBox`, polygon files, and geocoding. `vectors.py`: the DuckDB connection, reading any vector file, and writing every output format through `fiboa.py`. `cog.py` writes rasters.
-- `ftw2e.py` reads the 2nd Edition. `mosaics.py` and `quarterly.py` run ftw-q on the quarterly mosaics; `imagery.py` and `inference.py` run the PRUE models on scenes, and `inference.split_into` splits any model's probabilities into fields. `match.py` matches field sets; `zonal.py` adds raster statistics.
+- `ftw2e.py` reads the 2nd Edition. `imagery.py` picks and downloads scenes, and `inference.py` runs the PRUE models and splits their probabilities into fields. `match.py` matches field sets; `zonal.py` adds raster statistics.
 
 ## Commands
 
@@ -43,7 +43,7 @@ Working now:
 - Every written field is one Polygon: `vectors.write` keeps the largest polygon of a multi-part geometry and drops rows with none, and the GeoParquet `geometry_types` is `["Polygon"]`.
 - `ftw data diff AREA --from --to [--iou] [--out]`: the same matching between two years of the 2nd Edition, labeling every field of both years kept, changed, split, merged, new, or lost, so each year's counts add up to its total.
 - `ftw detect AREA --year --out`: imagery, model, and BoundaryVote in one step, writing fields to .parquet (fiboa), .gpkg, .geojson, or .fgb, with `--keep DIR` to keep the rasters and `--crs` (an EPSG code, or `utm`) for the output CRS. Non-4326 GeoParquet carries PROJJSON, which `fiboa.py` gets from DuckDB's bundled PROJ by writing a one-row file, so the base install needs no pyproj. `ftw predict` and `ftw polygonize` run the two halves, and `ftw models list` shows the models. Each detected field gets the 2nd Edition's `score` (mean field probability × 100, rounded) plus `field_prob` and `boundary_prob`, from a bincount over the instance labels on the probability grid; when a label's pixels form several pieces, the field keeps the largest. Splitting with `fbp.FTW_2E` keeps touching fields apart; connected regions of the field class, as in ftw-baselines, merge them wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
-- `ftw detect` with ftw-q, the default, follows the 2nd Edition pipeline in ftw-global-data-catalog's `pipeline/inference` and `postprocessing/outlines.py`. Tiles and their grids come from the mosaic mirror's per-quarter STAC GeoParquet (the latest fully published year stands in for earlier years, since the grid doesn't change). Each tile reads its window over the area plus 128 px (1.28 km) of halo, `quarterly.py` fills nodata (`window31`), divides by 3000, upsamples x4 (bilinear, half-pixel centers) and blends 512 px patches at 25% overlap with a Hann window, streaming one row of patches at a time so a full tile needs about 200 MB rather than 13 GB. It matches the catalog's torch `predict_tile` within 1/255 on 52 of 3.84M pixels of a real Ames window, and its nodata fill on all but one of 704k values. A tile keeps the fields whose centroid lies in its own 100 km MGRS square and UTM zone (with the 31V/32V exception). Fields that cross a UTM zone boundary can leave sliver overlaps between the two zones' copies (7 pairs, at most 1.7% of the smaller field, on a 7 by 4 km box across 90°W), which the 2nd Edition's seam union, at 10% overlap, would also leave.
+- `ftw detect` runs the PRUE models on two scenes near planting and harvest. It doesn't run ftw-q, the quarterly-mosaic model behind the 2nd Edition: those fields are already published for 2017 to 2025, and `ftw data query` reads them. ftw-q tiled detection lived in `mosaics.py` and `quarterly.py` until it was removed; git history has it.
 
 Planned:
 
@@ -55,7 +55,7 @@ Planned:
 
 ## Models
 
-The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), FTP, and ftw-q. The v1 and v2 models and DelineateAnything stay in ftw-baselines. The CLI reads single-file ONNX models from Hugging Face under `fieldsoftheworld`, with URLs pinned to a commit: FTP B3/B7, ftw-q, and the PRUE CC-BY B3/B5/B7 (`ftw-prue-ccby`, commit `ffe4452`). The v3 PRUE models without the CC-BY restriction are still checkpoints on GitHub releases and need the same export. Those exports match torch's predicted class on every pixel of the test image (logits within 3e-4), and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
+The CLI supports the recent models only: PRUE (FTW v3 and the v3.1 CC-BY variants), and FTP. The v1 and v2 models and DelineateAnything stay in ftw-baselines. The CLI reads single-file ONNX models from Hugging Face under `fieldsoftheworld`, with URLs pinned to a commit: FTP B3/B7 and the PRUE CC-BY B3/B5/B7 (`ftw-prue-ccby`, commit `ffe4452`). The v3 PRUE models without the CC-BY restriction are still checkpoints on GitHub releases and need the same export. Those exports match torch's predicted class on every pixel of the test image (logits within 3e-4), and onnxruntime runs a 256x512 tile in under 0.1 s on CPU.
 
 ### Parity with ftw-baselines
 
@@ -84,7 +84,7 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 ## Milestones
 
 1. `data` query and export, `view`, CI. (Done.)
-2. `imagery`, `models`, `detect`, `predict`, and `polygonize` with BoundaryVote, and tiled ftw-q detection on quarterly mosaics. (Done.)
+2. `imagery`, `models`, `detect`, `predict`, and `polygonize` with BoundaryVote. (Done.)
 3. `catalog`, `join catalog`, and `join sql`.
 4. `schema` and `SKILL.md`. (Done.) `view --web`.
 
