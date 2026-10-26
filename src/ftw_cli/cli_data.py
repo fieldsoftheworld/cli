@@ -47,7 +47,8 @@ def query(
     stats: Annotated[
         bool,
         Parameter(
-            show_default=False, help="Add field-size percentiles and size classes, in ha."
+            show_default=False,
+            help="Add field-size percentiles and size classes, in ha.",
         ),
     ] = False,
 ):
