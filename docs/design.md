@@ -28,7 +28,7 @@ Working now:
 - `ftw data query AREA [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
 - `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
-- `ftw tui`: pick an area and year, then see the fields on a map with a summary and a table, and export them.
+- `ftw tui`: search a place or pick a preset, step through the years with a sparkline of every year's field count, highlight a field on the map from the table, export, and run a model on the area to compare its fields with the 2nd Edition.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
 - `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
@@ -39,7 +39,6 @@ Planned:
 - `ftw join sql "..."`: DuckDB SQL with the datasets registered as views.
 - ftw-q (quarterly mosaics) and FTP (PlanetScope), which need their own imagery commands.
 - `ftw view --web`: a local MapLibre page over the 2nd Edition PMTiles and local files.
-- TUI: imagery and inference screens as those commands land.
 - `ftw schema [command]`: a command's parameters as JSON Schema, for agents.
 
 ## Models
@@ -73,7 +72,7 @@ ftw-cli will own the `ftw` command. When we switch, ftw-baselines' command becom
 ## Milestones
 
 1. `data` query and export, `view`, the TUI, CI. (Done.)
-2. `imagery`, `models`, and ONNX `infer`. (Done.) TUI screens for them, and better field splitting.
+2. `imagery`, `models`, ONNX `infer`, field splitting with BoundaryVote, and detection from the TUI. (Done.)
 3. `catalog`, `join catalog`, and `join sql`.
 4. `view --web`, `schema`, and `SKILL.md`.
 

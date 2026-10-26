@@ -98,3 +98,17 @@ def test_softmax_and_paste_keep_both_score_bands():
         1,
     )
     assert (scores == 7).all()
+
+
+def test_detected_fields_load_for_the_tui(tmp_path):
+    tui_detect = pytest.importorskip("ftw_cli.tui_detect")
+    field = np.zeros((40, 40), dtype=np.uint8)
+    field[10:30, 10:30] = 230
+    path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
+    infer.polygonize(path, tmp_path / "fields.parquet", simplify=0, min_size=0)
+
+    (loaded,) = tui_detect.load(tmp_path / "fields.parquet")
+
+    assert loaded["area_ha"] == pytest.approx(4.0)
+    assert loaded["score"] is None
+    assert loaded["geometry"]["type"] == "Polygon"

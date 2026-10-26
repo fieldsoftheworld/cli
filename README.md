@@ -56,7 +56,9 @@ ftw infer polygonize scores.tif --out fields.parquet
 ftw tui
 ```
 
-The TUI shows the fields of an area on a map colored by model score, with a summary and a table of the largest fields. `r` queries, `e` exports to GeoParquet, and `q` quits. The map is a full-resolution image in terminals with the kitty or sixel graphics protocols (kitty, WezTerm, iTerm2, recent Windows Terminal) and colored blocks elsewhere, including over SSH.
+![The ftw TUI showing fields in Beauce, France, with one field highlighted](docs/img/tui.png)
+
+Search a place with `/`, step through the years with `[` and `]` while the sidebar charts the field count of every year, and pick a field in the table to outline it on the map. `d` runs a model on the area and `m` switches the map between the 2nd Edition and the model's fields. `ctrl+p` opens a command palette with the presets, years, and export formats. The map is a full-resolution image in terminals with the kitty or sixel graphics protocols (kitty, WezTerm, iTerm2, recent Windows Terminal) and colored blocks elsewhere, including over SSH, as in the screenshot.
 
 ## For scripts and agents
 
