@@ -9,30 +9,20 @@ from cyclopts import App, Parameter
 from rich.panel import Panel
 from rich.table import Table
 
-from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import (
-    AreaArg,
-    CrsArg,
-    MaxArea,
-    MinArea,
-    MinScore,
-    YearArg,
-    YearsArg,
-    parse_area,
-)
-from ftw_cli.cli_compare import compare, diff, stats
+from ftw_cli import __version__, output
+from ftw_cli.cli_data import data, view
 from ftw_cli.cli_detect import detect, imagery, models, polygonize, predict
-from ftw_cli.filters import Filters
-from ftw_cli.progress import bar, spinner
+from ftw_cli.cli_fields import compare, stats
+from ftw_cli.progress import spinner
 
 app = App(
     name="ftw",
     version=__version__,
-    help="Fields of The World: field boundaries for people and agents.",
+    help="Fields of The World: agricultural field boundaries.",
+    default_parameter=Parameter(negative=""),
 )
-data = App(name="data", help="Query the FTW Global Data 2nd Edition in place.")
-data.command(diff)
-for command in (detect, predict, polygonize, compare, stats, data, imagery, models):
+commands = (data, view, detect, predict, polygonize, compare, stats, imagery, models)
+for command in commands:
     app.command(command)
 app.register_install_completion_command()
 
@@ -48,7 +38,7 @@ EXPECTED = (LookupError, ValueError, OSError, duckdb.Error)
 
 @app.default
 def home():
-    """What ftw does, with a few commands to start from."""
+    """A few commands to start from."""
     if not output.console.is_terminal:
         app.help_print()
         return
@@ -71,110 +61,20 @@ def home():
 @app.meta.default
 def _meta(
     *tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen=True)],
-    json: Annotated[bool | None, Parameter(negative="")] = None,
+    json: Annotated[
+        bool | None,
+        Parameter(
+            negative="", help="Print JSON. Default when stdout is not a terminal."
+        ),
+    ] = None,
 ):
-    """
-    Parameters
-    ----------
-    json
-        Print JSON. On by default when stdout is not a terminal.
-    """
     output.configure(json)
     return app(tokens)
 
 
-@data.command
-def info():
-    """Per-year totals: files, parcels, area, and download size."""
-    output.emit(ftw2e.info(ftw2e.connect()), title="FTW Global Data 2nd Edition")
-
-
-@data.command
-def query(
-    area: AreaArg,
-    *,
-    year: YearsArg = None,
-    out: Annotated[
-        Path | None,
-        Parameter(
-            help="Write the fields to .parquet (fiboa), .geojson, .gpkg, or .fgb."
-        ),
-    ] = None,
-    limit: Annotated[
-        int | None, Parameter(help="Write at most this many fields.")
-    ] = None,
-    crs: CrsArg = "4326",
-    min_area: MinArea = None,
-    max_area: MaxArea = None,
-    min_score: MinScore = None,
-    stats: Annotated[
-        bool,
-        Parameter(
-            help="Add field-size percentiles and size classes, in ha; the median per year for several years."
-        ),
-    ] = False,
-):
-    """Summarize the fields in AREA per year, or write them to a file with --out."""
-    box = parse_area(area)
-    filters = Filters(min_area, max_area, min_score)
-    con = ftw2e.connect()
-    years = ftw2e.parse_years(year, ftw2e.years(con))
-    label = f"{years[0]}" if len(years) == 1 else f"{years[0]}-{years[-1]}"
-    if out:
-        with spinner(f"Writing FTW {label} fields to {out}"):
-            output.emit(ftw2e.export(con, box, years, out, limit, crs, filters))
-        return
-    with bar(f"Reading FTW {label} fields") as progress:
-        rows = ftw2e.summaries(box, years, progress, filters, stats)
-    if len(rows) == 1:
-        output.emit(rows[0], title=f"FTW {label} fields")
-        return
-    # Several years: the full statistics would be too wide a table; keep the median.
-    keys = [
-        "year",
-        "fields",
-        "area_ha",
-        "mean_score",
-        *(["median_ha"] if stats else []),
-    ]
-    output.emit([{k: r[k] for k in keys} for r in rows], title="FTW fields by year")
-    years_ = [r["year"] for r in rows]
-    output.trend("fields", [r["fields"] for r in rows], years_)
-    if stats:
-        output.trend("median ha", [r["median_ha"] or 0 for r in rows], years_)
-
-
-@app.command
-def view(
-    area: AreaArg,
-    *,
-    out: Annotated[Path, Parameter(help="PNG file to write.")],
-    year: YearArg = None,
-    width: Annotated[int, Parameter(help="Image width in pixels.")] = 1200,
-    limit: Annotated[
-        int, Parameter(help="Draw at most this many fields, largest first.")
-    ] = 50_000,
-    min_area: MinArea = None,
-    max_area: MaxArea = None,
-    min_score: MinScore = None,
-):
-    """Draw the fields in AREA to a PNG, colored by model score."""
-    from ftw_cli import render
-
-    box = parse_area(area)
-    con = ftw2e.connect()
-    year = year or ftw2e.years(con)[-1]
-    with spinner(f"Drawing FTW {year} fields"):
-        fields = ftw2e.fields(
-            con, box, year, limit, Filters(min_area, max_area, min_score)
-        )
-        render.render(fields, box, width).save(out)
-    output.emit({"path": str(out), "fields": len(fields), "year": year})
-
-
 @app.command
 def doctor():
-    """What is installed and reachable. Attach the output to bug reports."""
+    """Check the install and network access."""
     from ftw_cli import doctor as checks
 
     with spinner("Checking the install and the network"):
@@ -186,11 +86,9 @@ def doctor():
 
 @app.command
 def schema(
-    *command: Annotated[
-        str, Parameter(help="A command, such as `detect` or `data query`.")
-    ],
+    *command: Annotated[str, Parameter(help="A command, such as `data query`.")],
 ):
-    """Each command's parameters as JSON Schema, or one command's: `ftw schema data query`."""
+    """Print command parameters as JSON Schema."""
     from ftw_cli import schema as schemas
 
     found = schemas.commands(app)
@@ -207,10 +105,10 @@ def skill(
     *,
     out: Annotated[
         Path | None,
-        Parameter(help="Write DIR/ftw/SKILL.md, e.g. --out ~/.claude/skills."),
+        Parameter(help="Install as DIR/ftw/SKILL.md, e.g. ~/.claude/skills."),
     ] = None,
 ):
-    """The agent skill that teaches ftw: printed, or installed into a skills directory."""
+    """Print the agent skill, or install it with --out."""
     packaged = Path(__file__).parent / "SKILL.md"
     # Editable installs don't copy it into the package; read it from the repo instead.
     source = Path(__file__).parents[2] / "skills" / "ftw" / "SKILL.md"

@@ -6,10 +6,10 @@ by 3000 and upsampled x4 with bilinear interpolation, and 512 px patches with 25
 are blended with a Hann window into uint8 field and boundary probabilities at 2.5 m.
 """
 
-from collections.abc import Callable
-
 import numpy as np
 from scipy.ndimage import uniform_filter
+
+from ftw_cli.progress import Progress
 
 PATCH, UP = 512, 4
 NATIVE = PATCH // UP
@@ -64,7 +64,7 @@ def predict(
     stack: np.ndarray,
     session,
     batch: int = 16,
-    progress: Callable[[int, int | None], None] | None = None,
+    progress: Progress | None = None,
 ) -> np.ndarray:
     """(16, H, W) int16 mosaics -> (2, 4H, 4W) uint8 field and boundary probabilities.
 

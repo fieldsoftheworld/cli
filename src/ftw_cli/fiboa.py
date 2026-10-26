@@ -30,6 +30,15 @@ def collection(name: str, **properties: object) -> dict:
     return {"schemas": {name: SCHEMAS}, "collection": name, **properties}
 
 
+def read_collection(con: duckdb.DuckDBPyConnection, path: str) -> dict | None:
+    """A Parquet file's collection metadata, if it has one."""
+    rows = con.execute(
+        "select decode(value) from parquet_kv_metadata(?) where decode(key) = 'collection'",
+        [path],
+    ).fetchall()
+    return json.loads(rows[0][0]) if rows else None
+
+
 def copy(
     con: duckdb.DuckDBPyConnection,
     query: str,

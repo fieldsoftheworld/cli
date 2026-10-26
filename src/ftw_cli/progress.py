@@ -1,49 +1,39 @@
-"""Progress on stderr for people at a terminal, and nothing for pipes and agents.
+"""Progress on stderr at a terminal; nothing for pipes and agents.
 
-Library functions take an optional ``progress(done, total)`` callback; ``bar`` makes one.
+Library functions take an optional ``Progress`` callback, ``progress(done, total)``.
 """
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    MofNCompleteColumn,
-    Progress,
-    ProgressColumn,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TransferSpeedColumn,
-)
+from rich import progress as rp
 
 from ftw_cli import output
 
+Progress = Callable[[int, int | None], None]
+
 
 @contextmanager
-def bar(
-    description: str, unit: str = "items"
-) -> Generator[Callable[[int, int | None], None]]:
-    """``unit`` is ``"items"`` (bar and count), ``"bytes"`` (bar, size, speed), or ``"none"``."""
+def bar(description: str, unit: str = "items") -> Generator[Progress]:
+    """``unit`` is ``items`` (bar and count), ``bytes`` (bar, size, speed), or ``none``."""
     if not output.stderr.is_terminal:
         yield lambda done, total: None
         return
     counts = {
-        "items": [MofNCompleteColumn()],
-        "bytes": [DownloadColumn(), TransferSpeedColumn()],
+        "items": [rp.MofNCompleteColumn()],
+        "bytes": [rp.DownloadColumn(), rp.TransferSpeedColumn()],
     }.get(unit)
-    columns: list[ProgressColumn] = [
-        SpinnerColumn("dots", style="#C0D85B"),
-        TextColumn("{task.description}"),
+    columns: list[rp.ProgressColumn] = [
+        rp.SpinnerColumn("dots", style="#C0D85B"),
+        rp.TextColumn("{task.description}"),
     ]
     if counts:
         columns += [
-            BarColumn(complete_style="#22A070", finished_style="#C0D85B"),
+            rp.BarColumn(complete_style="#22A070", finished_style="#C0D85B"),
             *counts,
         ]
-    with Progress(
-        *columns, TimeElapsedColumn(), console=output.stderr, transient=True
+    with rp.Progress(
+        *columns, rp.TimeElapsedColumn(), console=output.stderr, transient=True
     ) as live:
         task = live.add_task(description, total=None)
         yield lambda done, total: live.update(task, completed=done, total=total)

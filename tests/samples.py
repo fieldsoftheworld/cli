@@ -13,7 +13,7 @@ import numpy as np
 import rasterio
 from rasterio.warp import transform_bounds
 
-from ftw_cli import cog, detect
+from ftw_cli import cog, inference
 
 
 def main(out: Path) -> None:
@@ -33,9 +33,9 @@ def main(out: Path) -> None:
         np.stack([field, boundary]),
         profile,
         tags={"FTW_MODEL": "sample", "TIFFTAG_DATETIME": "2024:11:01 17:03:49"},
-        descriptions=detect.BANDS,
+        descriptions=inference.BANDS,
     )
-    result = detect.polygonize(out / "scores.tif", out / "fields.parquet")
+    result = inference.polygonize(out / "scores.tif", out / "fields.parquet")
     assert result["fields"] == 2, result
     bbox = transform_bounds(
         profile["crs"], "EPSG:4326", 400_000, 4_639_000, 413_000, 4_650_000

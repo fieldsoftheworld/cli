@@ -8,7 +8,6 @@ MGRS square and UTM zone, so a field on a seam is kept once.
 
 import json
 import urllib.request
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +19,9 @@ from rasterio.transform import Affine, from_origin
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window, from_bounds
 
-from ftw_cli import cog
-from ftw_cli.ftw2e import BBox
-from ftw_cli.places import USER_AGENT
+from ftw_cli import USER_AGENT, cog
+from ftw_cli.areas import BBox
+from ftw_cli.progress import Progress
 
 MIRROR = "https://data.source.coop/tge-labs/sentinel-2-quarterly-cloudless-mosaics"
 QUARTERS = ("Q1", "Q2", "Q3", "Q4")
@@ -31,8 +30,6 @@ BANDS = ("B04", "B03", "B02", "B08")
 # the 2nd Edition's 512 px halo at 2.5 m.
 HALO = 128
 SQUARE_M = 100_000.0
-
-Progress = Callable[[int, int | None], None]
 
 
 @dataclass(frozen=True)
@@ -183,7 +180,6 @@ def save(path: Path, scores: np.ndarray, part: Part, model: str) -> None:
 
 def _published_years() -> set[int]:
     """Years whose four quarter partitions the mosaic collection links to."""
-    # Source Cooperative refuses urllib's default User-Agent.
     request = urllib.request.Request(
         f"{MIRROR}/mosaics/collection.json", headers={"User-Agent": USER_AGENT}
     )

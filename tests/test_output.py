@@ -1,3 +1,7 @@
+import json
+
+import pytest
+
 from ftw_cli import output
 
 
@@ -17,3 +21,9 @@ def test_trend_is_silent_in_json_mode(capsys):
 def test_cells_keep_coordinates_on_one_line():
     assert output._cell("bbox", [-93.7, 41.95]) == "-93.7, 41.95"
     assert output._cell("scenes", ["a", "b"]) == "a\nb"
+
+
+def test_piped_output_is_json(capsys: pytest.CaptureFixture[str]):
+    output.configure(None)  # capsys stdout is not a TTY
+    output.emit([{"year": 2025, "fields": 394}])
+    assert json.loads(capsys.readouterr().out) == [{"year": 2025, "fields": 394}]

@@ -1,6 +1,5 @@
 """``ftw doctor``: what is installed and what is reachable, for bug reports."""
 
-import importlib.util
 import platform
 import urllib.request
 from collections.abc import Callable
@@ -9,7 +8,8 @@ from importlib.metadata import version
 
 import duckdb
 
-from ftw_cli import __version__, ftw2e, models, places
+from ftw_cli import USER_AGENT, __version__, areas, ftw2e, models, vectors
+from ftw_cli.cli_args import missing
 
 
 class Missing(Exception):
@@ -21,19 +21,19 @@ def ftw_cli() -> str:
 
 
 def duckdb_() -> str:
-    ftw2e.connect()
+    vectors.connect()
     return f"{duckdb.__version__}, httpfs and spatial load"
 
 
 def imagery() -> str:
-    _need("rasterio", "pystac_client", "planetary_computer", extra="imagery")
+    _need("imagery")
     import rasterio
 
     return f"rasterio {rasterio.__version__}, GDAL {rasterio.__gdal_version__}"
 
 
 def inference() -> str:
-    _need("onnxruntime", "fbp", extra="inference")
+    _need("inference")
     import onnxruntime
 
     providers = [
@@ -44,31 +44,16 @@ def inference() -> str:
     return f"onnxruntime {onnxruntime.__version__} ({gpu}: {', '.join(providers)}), ftw-fbp {version('ftw-fbp')}"
 
 
+def stats() -> str:
+    _need("stats")
+    return f"exactextract {version('exactextract')}"
+
+
 def cache() -> str:
     root = models.cache_dir()
-    size = (
-        sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
-        if root.exists()
-        else 0
-    )
+    size = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
     cached = [name for name in models.MODELS if models.cached(name)]
     return f"{root}, {size / 1e6:,.0f} MB, models: {', '.join(cached) or 'none'}"
-
-
-def source_coop() -> str:
-    return _reach(ftw2e.VECTOR_INDEX)
-
-
-def planetary_computer() -> str:
-    return _reach("https://planetarycomputer.microsoft.com/api/stac/v1")
-
-
-def hugging_face() -> str:
-    return _reach(models.MODELS[models.DEFAULT_MODEL].url)
-
-
-def nominatim() -> str:
-    return _reach(places.SEARCH_URL.replace("/search", "/status"))
 
 
 CHECKS: dict[str, Callable[[], str]] = {
@@ -76,11 +61,14 @@ CHECKS: dict[str, Callable[[], str]] = {
     "duckdb": duckdb_,
     "imagery extra": imagery,
     "inference extra": inference,
+    "stats extra": stats,
     "cache": cache,
-    "Source Coop": source_coop,
-    "Planetary Computer": planetary_computer,
-    "Hugging Face": hugging_face,
-    "Nominatim": nominatim,
+    "Source Coop": lambda: _reach(ftw2e.VECTOR_INDEX),
+    "Planetary Computer": lambda: _reach(
+        "https://planetarycomputer.microsoft.com/api/stac/v1"
+    ),
+    "Hugging Face": lambda: _reach(models.MODELS[models.DEFAULT_MODEL].url),
+    "Nominatim": lambda: _reach(areas.SEARCH_URL.replace("/search", "/status")),
 }
 
 
@@ -100,14 +88,14 @@ def run() -> list[dict]:
     return rows
 
 
-def _need(*modules: str, extra: str) -> None:
-    if missing := [m for m in modules if importlib.util.find_spec(m) is None]:
-        raise Missing(f"missing {', '.join(missing)}: pip install 'ftw-cli[{extra}]'")
+def _need(extra: str) -> None:
+    if gone := missing(extra):
+        raise Missing(f"missing {', '.join(gone)}: pip install 'ftw-cli[{extra}]'")
 
 
 def _reach(url: str) -> str:
     request = urllib.request.Request(
-        url, headers={"Range": "bytes=0-0", "User-Agent": places.USER_AGENT}
+        url, headers={"Range": "bytes=0-0", "User-Agent": USER_AGENT}
     )
     with urllib.request.urlopen(request, timeout=15) as response:
         return f"HTTP {response.status} from {url.split('/')[2]}"

@@ -6,19 +6,19 @@ import pytest
 
 rasterio = pytest.importorskip("rasterio")
 
-from ftw_cli import detect
+from ftw_cli import inference
 
 
 def test_patch_grid_is_centered_like_torchgeo():
     # 1118 px with 512 px patches and stride 448: ceil(606 / 448) + 1 = 3 patches spanning
     # 1408 px, so the 290 px overhang is split evenly between both ends.
-    assert detect._starts(1118, 512, 448) == [-145, 303, 751]
+    assert inference._starts(1118, 512, 448) == [-145, 303, 751]
 
 
 def test_upsample_aligns_corners():
     # kornia's Resize (used in training) keeps the corner pixels and spaces samples evenly.
     image = np.array([[[0.0, 3.0]]], dtype=np.float32)
-    assert np.allclose(detect._upsample(image, 2)[0, 0], [0.0, 1.0, 2.0, 3.0])
+    assert np.allclose(inference._upsample(image, 2)[0, 0], [0.0, 1.0, 2.0, 3.0])
 
 
 def _scores(path, field, boundary):
@@ -44,7 +44,7 @@ def test_polygonize_measures_meters_and_writes_wgs84(tmp_path):
     field[10:30, 10:30] = 230  # 20 x 20 pixels at 10 m = 40,000 m²
     path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
 
-    result = detect.polygonize(
+    result = inference.polygonize(
         path, tmp_path / "fields.parquet", simplify=0, min_area=0
     )
 
@@ -72,12 +72,12 @@ def test_a_field_in_pieces_keeps_its_largest_polygon(tmp_path, monkeypatch):
     instances = np.zeros((40, 40), dtype=np.int32)
     instances[0:20, 0:20] = 1  # 40,000 m²
     instances[30:35, 30:35] = 1  # the same field's 2,500 m² stray piece
-    monkeypatch.setattr(detect, "run_windowed", lambda *args, **kwargs: instances)
+    monkeypatch.setattr(inference, "run_windowed", lambda *args, **kwargs: instances)
     field = np.where(instances > 0, 255, 0).astype(np.uint8)
     path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
 
     out = tmp_path / "fields.parquet"
-    assert detect.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
+    assert inference.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
     row = pq.read_table(out).to_pylist()[0]
     assert row["metrics:area"] == pytest.approx(40_000)
     assert row["score"] == 100
@@ -91,7 +91,7 @@ def test_polygonize_filters_fields_by_area(tmp_path):
 
     def count(**filters) -> int:
         out = tmp_path / "fields.parquet"
-        return detect.polygonize(path, out, simplify=0, **filters)["fields"]
+        return inference.polygonize(path, out, simplify=0, **filters)["fields"]
 
     assert count() == 2
     assert count(min_area=10_000) == 1
@@ -108,7 +108,7 @@ def test_polygonize_splits_touching_fields_at_the_boundary(tmp_path):
     field[10:30, 30] = 20
     path = _scores(tmp_path / "scores.tif", field, boundary)
 
-    result = detect.polygonize(
+    result = inference.polygonize(
         path, tmp_path / "fields.parquet", simplify=0, min_area=0
     )
 
@@ -130,19 +130,19 @@ def test_polygonize_rejects_a_single_band_raster(tmp_path):
     ) as dst:
         dst.write(np.zeros((1, 8, 8), dtype=np.uint8))
     with pytest.raises(ValueError, match="expected field and boundary"):
-        detect.polygonize(path, tmp_path / "fields.parquet")
+        inference.polygonize(path, tmp_path / "fields.parquet")
 
 
 def test_softmax_and_paste_keep_both_score_bands():
     logits = np.zeros((1, 3, 4, 4), dtype=np.float32)
     logits[0, 1] = 10
-    probs = detect._softmax(logits)
+    probs = inference._softmax(logits)
     assert np.allclose(probs.sum(axis=1), 1) and probs[0, 1].min() > 0.99
     scores = np.zeros((2, 4, 4), dtype=np.uint8)
-    detect._paste(
+    inference._paste(
         scores,
         np.full((2, 4, 4), 7, np.uint8),
-        detect.Window.from_slices((0, 4), (0, 4)),
+        inference.Window.from_slices((0, 4), (0, 4)),
         1,
     )
     assert (scores == 7).all()
@@ -158,7 +158,7 @@ def test_polygonize_writes_gdal_formats_in_wgs84(tmp_path, suffix):
     out = tmp_path / f"fields{suffix}"
     out.write_text("stale")  # an existing file is replaced, not appended to
 
-    assert detect.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
+    assert inference.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
 
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial")
@@ -175,7 +175,7 @@ def test_polygonize_writes_gdal_formats_in_wgs84(tmp_path, suffix):
 
 def test_polygonize_rejects_unknown_formats_before_reading(tmp_path):
     with pytest.raises(ValueError, match="unsupported format '.shp'"):
-        detect.polygonize(tmp_path / "missing.tif", tmp_path / "fields.shp")
+        inference.polygonize(tmp_path / "missing.tif", tmp_path / "fields.shp")
 
 
 @pytest.mark.parametrize(("crs", "code"), [("3857", 3857), ("utm", 32615)])
@@ -186,12 +186,12 @@ def test_polygonize_writes_the_requested_crs(tmp_path, crs, code):
     field[10:30, 10:30] = 230
     path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
 
-    parquet = detect.polygonize(path, tmp_path / "f.parquet", 0, 0, crs=crs)
+    parquet = inference.polygonize(path, tmp_path / "f.parquet", 0, 0, crs=crs)
     geo = json.loads(pq.read_schema(tmp_path / "f.parquet").metadata[b"geo"])
     assert parquet["crs"] == f"EPSG:{code}"
     assert geo["columns"]["geometry"]["crs"]["id"]["code"] == code
 
-    detect.polygonize(path, tmp_path / "f.gpkg", 0, 0, crs=crs)
+    inference.polygonize(path, tmp_path / "f.gpkg", 0, 0, crs=crs)
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial")
     [(srs,)] = con.execute(
@@ -204,7 +204,7 @@ def test_polygonize_writes_the_requested_crs(tmp_path, crs, code):
 def test_polygonize_keeps_only_fields_in_the_area_polygon(tmp_path):
     import duckdb
 
-    from ftw_cli.ftw2e import BBox
+    from ftw_cli.areas import BBox
 
     field = np.zeros((40, 80), dtype=np.uint8)
     field[10:30, 10:30] = 230  # x 400,100-400,300 m
@@ -218,7 +218,7 @@ def test_polygonize_keeps_only_fields_in_the_area_polygon(tmp_path):
     ).fetchall()
     area = BBox(-180, -90, 180, 90, shape=wkt)
 
-    kept = detect.polygonize(path, tmp_path / "f.parquet", 0, 0, area=area)
-    every = detect.polygonize(path, tmp_path / "all.parquet", 0, 0)
+    kept = inference.polygonize(path, tmp_path / "f.parquet", 0, 0, area=area)
+    every = inference.polygonize(path, tmp_path / "all.parquet", 0, 0)
 
     assert (kept["fields"], every["fields"]) == (1, 2)

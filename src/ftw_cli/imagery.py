@@ -20,8 +20,9 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
 
-from ftw_cli import cog
-from ftw_cli.ftw2e import BBox, Progress
+from ftw_cli import cog, vectors
+from ftw_cli.areas import BBox
+from ftw_cli.progress import Progress
 
 CROP_CALENDAR = "https://data.source.coop/ftw/ftw-inference-input/global-crop-calendar/"
 SEASON_START = CROP_CALENDAR + "sc-sos-3x3-v2-cog.tiff"
@@ -93,8 +94,7 @@ def search(
         )
         .item_collection()
     )
-    con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con = vectors.connect()
     scenes = [
         Scene(
             id=item.id,
