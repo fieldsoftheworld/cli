@@ -19,7 +19,8 @@ def score_color(score: float | None) -> tuple[int, int, int]:
     for (s0, c0), (s1, c1) in pairwise(RAMP):
         if s <= s1:
             t = (s - s0) / (s1 - s0)
-            return tuple(round(a + (b - a) * t) for a, b in zip(c0, c1, strict=True))
+            r, g, b = (round(a + (b - a) * t) for a, b in zip(c0, c1, strict=True))
+            return r, g, b
     return RAMP[-1][1]
 
 
