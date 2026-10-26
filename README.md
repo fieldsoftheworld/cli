@@ -58,6 +58,10 @@ Every command prints JSON when its output is piped, or with `--json`, and tables
 ftw data query "Chartres, France" --year 2023 | jq .fields
 ```
 
+## Troubleshooting
+
+`ftw doctor` checks the install (versions, extras, GPU, cache) and whether Source Coop, Planetary Computer, Hugging Face, and Nominatim are reachable. Please include its output in bug reports. It exits non-zero when a check fails; extras you haven't installed show as missing.
+
 ## Develop
 
 ```sh
