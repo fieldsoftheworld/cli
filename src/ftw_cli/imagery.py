@@ -1,11 +1,11 @@
 """Pick and download the two Sentinel-2 scenes FTW models take, using the crop calendar.
 
-Ported from ftw-baselines' ``download_img.py`` with the same scene selection and output
-layout, using rasterio warped reads in place of odc-stac, dask, and xarray.
+Selects scenes as ftw-baselines' ``download_img.py`` does, with rasterio warped reads
+in place of odc-stac, dask, and xarray.
 """
 
+import json
 import math
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -21,7 +21,7 @@ from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
 
 from ftw_cli import cog
-from ftw_cli.ftw2e import BBox
+from ftw_cli.ftw2e import BBox, Progress
 
 CROP_CALENDAR = "https://data.source.coop/ftw/ftw-inference-input/global-crop-calendar/"
 SEASON_START = CROP_CALENDAR + "sc-sos-3x3-v2-cog.tiff"
@@ -45,9 +45,20 @@ MAX_AOI_NODATA = 50.0
 class Scene:
     id: str
     date: str
+    target_date: str
     cloud_cover: float
     aoi_nodata: float
     href: str
+
+
+def find(
+    bbox: BBox, year: int, host: str, buffer_days: int, cloud_cover_max: float
+) -> list[Scene]:
+    """The scenes nearest the start and end of the growing season over ``bbox``."""
+    return [
+        search(bbox, when, host, buffer_days, cloud_cover_max)
+        for when in season(bbox, year)
+    ]
 
 
 def season(bbox: BBox, year: int) -> tuple[date, date]:
@@ -88,6 +99,7 @@ def search(
         Scene(
             id=item.id,
             date=item.datetime.date().isoformat(),
+            target_date=when.isoformat(),
             cloud_cover=item.properties["eo:cloud_cover"],
             aoi_nodata=_aoi_nodata(con, item.geometry, bbox),
             href=item.get_self_href(),
@@ -108,7 +120,7 @@ def download(
     bbox: BBox,
     out: Path,
     host: str = "mspc",
-    progress: Callable[[int, int | None], None] | None = None,
+    progress: Progress | None = None,
 ) -> dict:
     """Stack the RGBN bands of ``scenes`` over ``bbox`` into one uint16 GeoTIFF at 10 m.
 
@@ -216,8 +228,6 @@ def _from_day(year: int, day: int) -> date:
 
 def _aoi_nodata(con: duckdb.DuckDBPyConnection, footprint: dict, bbox: BBox) -> float:
     """Percent of ``bbox`` outside the scene's footprint (planar in degrees, fine at AOI scale)."""
-    import json
-
     covered = con.execute(
         f"""select ST_Area(ST_Intersection(ST_GeomFromGeoJSON(?), {bbox.envelope()}))
                    / ST_Area({bbox.envelope()})""",
@@ -227,10 +237,7 @@ def _aoi_nodata(con: duckdb.DuckDBPyConnection, footprint: dict, bbox: BBox) -> 
 
 
 def _baseline(item) -> float:
-    value = item.properties.get(
-        "processing:version", item.properties.get("s2:processing_baseline", 0)
+    props = item.properties
+    return float(
+        props.get("processing:version") or props.get("s2:processing_baseline") or 0
     )
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0

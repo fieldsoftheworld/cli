@@ -1,12 +1,16 @@
 """The ``ftw`` command line."""
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
+import duckdb
 from cyclopts import App, Parameter
+from rich.panel import Panel
+from rich.table import Table
 
 from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import AreaArg, YearArg, fail, parse_area
+from ftw_cli.cli_args import AreaArg, YearArg, parse_area
 from ftw_cli.cli_infer import imagery, infer, models
 from ftw_cli.progress import bar, spinner
 
@@ -15,13 +19,9 @@ app = App(
     version=__version__,
     help="Fields of The World: field boundaries for people and agents.",
 )
-data = App(
-    name="data", help="Query the FTW Global Data 2nd Edition field boundaries in place."
-)
-app.command(data)
-app.command(imagery)
-app.command(models)
-app.command(infer)
+data = App(name="data", help="Query the FTW Global Data 2nd Edition in place.")
+for group in (data, imagery, models, infer):
+    app.command(group)
 app.register_install_completion_command()
 
 EXAMPLES = [
@@ -30,6 +30,8 @@ EXAMPLES = [
     ("", 'ftw view "Chartres, France" --out chartres.png'),
     ("Detect", 'ftw infer all "Poltava, Ukraine" --year 2024 --out-dir poltava'),
 ]
+# Errors that are the input's or the network's fault: one line, no traceback.
+EXPECTED = (LookupError, ValueError, OSError, duckdb.Error)
 
 
 @app.default
@@ -38,26 +40,19 @@ def home():
     if not output.console.is_terminal:
         app.help_print()
         return
-    from rich.panel import Panel
-    from rich.table import Table
-
     examples = Table.grid(padding=(0, 2))
     for group, command in EXAMPLES:
-        examples.add_row(f"[bold #C0D85B]{group}[/]", f"[white]{command}[/]")
+        examples.add_row(f"[bold #C0D85B]{group}[/]", command)
     output.console.print(
         Panel(
             examples,
-            title=f"[bold #C0D85B]ftw[/] [white]Fields of The World[/] [dim]{__version__}[/]",
-            subtitle="[dim]ftw --help for every command · ftw --install-completion[/]",
+            title=f"[bold #C0D85B]ftw[/] Fields of The World [dim]{__version__}[/]",
+            subtitle="[dim]ftw --help · ftw --install-completion[/]",
             subtitle_align="left",
             border_style="#22A070",
             padding=(1, 2),
             expand=False,
         )
-    )
-    output.console.print(
-        "  [#7EC185]Field boundaries for any place on Earth, 2017 to 2025, from your terminal.[/]",
-        highlight=False,
     )
 
 
@@ -83,15 +78,6 @@ def info():
 
 
 @data.command
-def files(area: AreaArg, *, year: YearArg = None):
-    """List the partition files a query over AREA would read, without reading them."""
-    box = parse_area(area)
-    con = ftw2e.connect()
-    year = year or ftw2e.latest_year(con)
-    output.emit(ftw2e.files(con, box, year), title=f"Files for {year}")
-
-
-@data.command
 def query(
     area: AreaArg,
     *,
@@ -99,7 +85,7 @@ def query(
     out: Annotated[
         Path | None,
         Parameter(
-            help="Write the fields to this file (.parquet, .geojson, .gpkg, .fgb)."
+            help="Write the fields to .parquet (fiboa), .geojson, .gpkg, or .fgb."
         ),
     ] = None,
     limit: Annotated[
@@ -109,29 +95,23 @@ def query(
     """Summarize the fields in AREA, or write them to a file with --out."""
     box = parse_area(area)
     con = ftw2e.connect()
-    year = year or ftw2e.latest_year(con)
-    if out is None:
-        with spinner(f"Reading FTW {year} fields"):
-            summary = ftw2e.summarize(con, box, year)
-        output.emit(summary, title=f"FTW {year} fields")
-        return
-    try:
+    year = year or ftw2e.years(con)[-1]
+    if out:
         with spinner(f"Writing FTW {year} fields to {out}"):
-            output.emit(ftw2e.export(con, box, year, out, limit))
-    except (LookupError, ValueError) as e:
-        fail(str(e))
+            result = ftw2e.export(con, box, year, out, limit)
+    else:
+        with spinner(f"Reading FTW {year} fields"):
+            result = ftw2e.summarize(con, box, year)
+    output.emit(result, title=f"FTW {year} fields")
 
 
 @data.command
 def history(area: AreaArg):
-    """Fields, area, and mean score in AREA for every year, 2017 to the latest."""
+    """Fields, area, and mean score in AREA for every year."""
     box = parse_area(area)
     with bar("Reading every year") as progress:
         rows = ftw2e.history(box, progress)
-    output.emit(
-        [{k: r[k] for k in ("year", "fields", "area_ha", "mean_score")} for r in rows],
-        title="FTW fields by year",
-    )
+    output.emit(rows, title="FTW fields by year")
     output.trend("fields", [r["fields"] for r in rows], [r["year"] for r in rows])
 
 
@@ -151,12 +131,20 @@ def view(
 
     box = parse_area(area)
     con = ftw2e.connect()
-    year = year or ftw2e.latest_year(con)
+    year = year or ftw2e.years(con)[-1]
     with spinner(f"Drawing FTW {year} fields"):
         fields = ftw2e.fields(con, box, year, limit)
         render.render(fields, box, width).save(out)
     output.emit({"path": str(out), "fields": len(fields), "year": year})
 
 
+def _report(kind, error, traceback):
+    if issubclass(kind, EXPECTED):
+        output.stderr.print(f"[red]error:[/red] {error}")
+    else:
+        sys.__excepthook__(kind, error, traceback)
+
+
 def run():
+    sys.excepthook = _report
     app.meta()

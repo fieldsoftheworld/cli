@@ -37,11 +37,10 @@ def copy(
 ) -> int:
     """Write the rows of ``query`` to ``out`` and return how many there were.
 
-    ``query`` must have a GEOMETRY column named ``geometry`` in EPSG:4326 longitude,
-    latitude order, and no ``bbox`` column; this adds one for the covering. Rows are
-    sorted along a Hilbert curve so readers can skip row groups outside their area.
-    The batches stream through pyarrow because fiboa fixes each column's nullability
-    and timestamp unit, which DuckDB's own Parquet writer infers instead.
+    ``query`` has a lon/lat GEOMETRY column ``geometry`` and no ``bbox``; this adds the
+    bbox covering and sorts rows along a Hilbert curve so readers can skip row groups.
+    Batches go through pyarrow because fiboa fixes nullability and timestamp units that
+    DuckDB's Parquet writer infers.
     """
     reader = con.sql(
         f"""
@@ -72,7 +71,7 @@ def copy(
 def _schema(source: pa.Schema) -> pa.Schema:
     """``source`` with fiboa's nullability and millisecond UTC timestamps.
 
-    Arrow stores timestamps as UTC instants, so relabeling a zone as UTC keeps the values.
+    Arrow timestamps are UTC instants, so relabeling the zone keeps the values.
     """
     fields = []
     for field in source:

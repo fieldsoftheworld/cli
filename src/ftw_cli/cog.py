@@ -1,12 +1,13 @@
 """Write rasters as Cloud Optimized GeoTIFFs."""
 
-import os
 import tempfile
 from pathlib import Path
 
 import numpy as np
 import rasterio
 from rasterio.shutil import copy as copy_dataset  # ty: ignore[unresolved-import]
+
+PROFILE_KEYS = ("crs", "transform", "width", "height", "nodata")
 
 
 def write(
@@ -18,32 +19,21 @@ def write(
 ) -> None:
     """Write ``data`` (bands, rows, cols) to ``out`` as a COG with averaged overviews.
 
-    GDAL's COG driver only copies an existing dataset, so this writes a plain GeoTIFF
-    beside ``out`` first, on disk rather than in memory so a large tile isn't held twice.
+    GDAL's COG driver only copies a dataset, so this writes a GeoTIFF to a temporary
+    directory beside ``out`` first, on disk so a large tile isn't held in memory twice.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(suffix=".tif", dir=out.parent)
-    os.close(fd)
-    try:
-        base = {
-            k: v
-            for k, v in profile.items()
-            if k in ("crs", "transform", "width", "height", "nodata")
-        }
+    base = {k: v for k, v in profile.items() if k in PROFILE_KEYS}
+    with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
+        staged = Path(tmp) / out.name
         with rasterio.open(
-            tmp,
-            "w",
-            driver="GTiff",
-            count=data.shape[0],
-            dtype=data.dtype,
-            **base,
+            staged, "w", driver="GTiff", count=data.shape[0], dtype=data.dtype, **base
         ) as dst:
             dst.write(data)
-            if tags:
-                dst.update_tags(**tags)
+            dst.update_tags(**(tags or {}))
             if descriptions:
                 dst.descriptions = descriptions
-        with rasterio.open(tmp) as src:
+        with rasterio.open(staged) as src:
             copy_dataset(
                 src,
                 out,
@@ -54,5 +44,3 @@ def write(
                 overview_resampling="average",
                 bigtiff="IF_SAFER",
             )
-    finally:
-        os.remove(tmp)

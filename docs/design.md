@@ -24,12 +24,11 @@ ftw-baselines trains and evaluates the FTW models. ftw-cli is for using them: qu
 Working now:
 
 - `ftw data info`: per-year totals for the 2nd Edition.
-- `ftw data files AREA`: the files a query would read, and their sizes.
 - `ftw data query AREA [--year] [--out] [--limit]`: summary stats, or the fields written to `.parquet`, `.geojson`, `.gpkg`, or `.fgb`.
 - `ftw data history AREA`: the summary for every year, with a sparkline of the field count.
 - `ftw view AREA --out map.png`: the fields drawn to a PNG, colored by score.
 - `ftw imagery search|download AREA --year`: the least cloudy Sentinel-2 scenes near the start and end of the growing season from the crop calendar, stacked into one 8-band GeoTIFF.
-- `ftw models list|show`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
+- `ftw models list`, `ftw infer run|polygonize`, and `ftw infer all` (search, download, run, polygonize). `infer run` writes field and boundary probabilities, and `infer polygonize` splits them into fields with `fbp.FTW_2E` from ftw-fbp, the BoundaryVote setting of the 2nd Edition. Connected regions of the field class, as in ftw-baselines, merge touching fields wherever the predicted boundary has a gap (240 polygons where the 2nd Edition has 1,028 in a 10 km box in Beauce).
 
 Planned:
 

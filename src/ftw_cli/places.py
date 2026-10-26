@@ -14,10 +14,10 @@ from ftw_cli.models import cache_dir
 SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 # Nominatim's usage policy asks for an identifying User-Agent and cached results.
 USER_AGENT = f"ftw-cli/{__version__} (https://github.com/fieldsoftheworld/cli)"
-# A village or a single farm geocodes to a box a few hundred meters wide, too small to
-# show any fields, so boxes narrower than this are widened around their center.
+# Villages geocode to a few hundred meters, too small to hold fields; widen them to this.
 MIN_SIDE_KM = 5.0
-NUMBERS = re.compile(r"^\s*-?\d+(\.\d+)?(\s*,\s*-?\d+(\.\d+)?){3}\s*$")
+# Numbers and commas only: a bbox, even a malformed one, never a place name.
+NUMBERS = re.compile(r"^[\d\s,.+-]+$")
 
 
 @dataclass(frozen=True)
@@ -33,11 +33,8 @@ def is_bbox(text: str) -> bool:
 def geocode(query: str) -> Place:
     """The best match for ``query``, from the cache or from Nominatim."""
     key = " ".join(query.lower().split())
-    path = cache_dir().parent / "places.json"
-    try:
-        cache = json.loads(path.read_text())
-    except (OSError, ValueError):
-        cache = {}
+    path = cache_dir() / "places.json"
+    cache = json.loads(path.read_text()) if path.exists() else {}
     if key not in cache:
         url = f"{SEARCH_URL}?" + urllib.parse.urlencode(
             {"q": query, "format": "jsonv2", "limit": 1}

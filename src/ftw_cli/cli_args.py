@@ -1,55 +1,51 @@
-"""Argument types and error handling shared by the ``ftw`` commands."""
+"""Arguments shared by the ``ftw`` commands."""
 
-import sys
-from typing import Annotated, NoReturn
+import importlib.util
+from typing import Annotated
 
 from cyclopts import Parameter
 
-from ftw_cli import ftw2e, output
+from ftw_cli import output, places
+from ftw_cli.ftw2e import BBox
 
 AreaArg = Annotated[
     str,
     Parameter(
         name=["area", "--bbox", "--place"],
         allow_leading_hyphen=True,
-        help='A place name ("Story County, Iowa") or xmin,ymin,xmax,ymax in EPSG:4326 degrees.',
+        help='A place name ("Story County, Iowa") or xmin,ymin,xmax,ymax in degrees.',
     ),
 ]
-# Above this, a query reads many partition files; say so before the wait starts.
-LARGE_AREA_KM2 = 10_000
 YearArg = Annotated[
     int | None, Parameter(help="Dataset year (2017-2025). Defaults to the latest.")
 ]
+EXTRAS = {
+    "imagery": ("rasterio", "pystac_client", "planetary_computer"),
+    "inference": (
+        "rasterio",
+        "pystac_client",
+        "planetary_computer",
+        "onnxruntime",
+        "fbp",
+    ),
+}
+LARGE_AREA_KM2 = 10_000
 
 
-def parse_area(text: str) -> ftw2e.BBox:
+def parse_area(text: str) -> BBox:
     """A bbox from AREA, geocoding it when it is not four numbers."""
-    from ftw_cli import places
+    if places.is_bbox(text):
+        return BBox.parse(text)
+    place = places.geocode(text)
+    output.stderr.print(f"[dim]{place.name}  →  {place.bbox}[/dim]")
+    if (km2 := place.bbox.area_km2()) > LARGE_AREA_KM2:
+        output.stderr.print(f"[yellow]{km2:,.0f} km² may read several GB.[/yellow]")
+    return place.bbox
 
-    try:
-        if places.is_bbox(text):
-            return ftw2e.BBox.parse(text)
-        place = places.geocode(text)
-    except ValueError as e:
-        fail(str(e))
-    except (LookupError, OSError) as e:
-        fail(f"could not find {text!r}: {e}")
-    box = place.bbox
-    corners = ",".join(f"{v:.4f}" for v in vars(box).values())
-    output.stderr.print(f"[dim]{place.name}  →  {corners}[/dim]")
-    if (km2 := box.area_km2()) > LARGE_AREA_KM2:
-        output.stderr.print(
-            f"[yellow]{km2:,.0f} km² is a large area; this may read several GB.[/yellow]"
+
+def require(extra: str) -> None:
+    if missing := [m for m in EXTRAS[extra] if importlib.util.find_spec(m) is None]:
+        raise SystemExit(
+            f"error: this command needs the {extra} extra ({', '.join(missing)} "
+            f"missing): pip install 'ftw-cli[{extra}]'"
         )
-    return box
-
-
-def fail(message: str, code: int = 2) -> NoReturn:
-    output.stderr.print(f"[red]error:[/red] {message}")
-    sys.exit(code)
-
-
-def need(extra: str, error: ImportError) -> NoReturn:
-    fail(
-        f"this command needs the {extra} extra ({error.name} is missing): pip install 'ftw-cli[{extra}]'"
-    )
