@@ -1,0 +1,12 @@
+{
+  "name": "fieldsoftheworld",
+  "description": "Fields of The World agent skills",
+  "owner": { "name": "Fields of The World" },
+  "plugins": [
+    {
+      "name": "ftw",
+      "source": "./",
+      "description": "Field boundaries for any place on Earth with the ftw CLI: query the FTW 2nd Edition, detect fields in new imagery, and export them."
+    }
+  ]
+}

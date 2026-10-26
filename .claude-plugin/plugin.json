@@ -1,0 +1,11 @@
+{
+  "name": "ftw",
+  "version": "0.1.0",
+  "description": "Field boundaries for any place on Earth with the ftw CLI from Fields of The World.",
+  "author": {
+    "name": "Fields of The World"
+  },
+  "homepage": "https://github.com/fieldsoftheworld/cli",
+  "license": "MIT",
+  "icon": ".claude-plugin/icon.png"
+}
