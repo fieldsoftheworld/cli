@@ -34,11 +34,11 @@ ftw infer all --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out-dir iowa
 # Or step by step
 ftw imagery search --bbox -93.7,41.95,-93.6,42.05 --year 2024
 ftw imagery download --bbox -93.7,41.95,-93.6,42.05 --year 2024 --out iowa.tif
-ftw infer run iowa.tif --out classes.tif --model prue-ccby-b5
-ftw infer polygonize classes.tif --out fields.parquet
+ftw infer run iowa.tif --out scores.tif --model prue-ccby-b5
+ftw infer polygonize scores.tif --out fields.parquet
 ```
 
-`ftw imagery` picks the least cloudy Sentinel-2 scene near the start and end of the growing season from the crop calendar, as ftw-baselines does. `ftw infer` runs the models in ONNX through onnxruntime, so there's no PyTorch dependency, and uses a GPU when onnxruntime has one. `ftw models list` shows the models; they download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The polygons are GeoParquet in EPSG:4326 with the same columns as the FTW 2nd Edition.
+`ftw imagery` picks the least cloudy Sentinel-2 scene near the start and end of the growing season from the crop calendar, as ftw-baselines does. `ftw infer` runs the models in ONNX through onnxruntime, so there's no PyTorch dependency, and uses a GPU when onnxruntime has one. `ftw models list` shows the models; they download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). `ftw infer run` writes field and boundary probabilities, and `ftw infer polygonize` splits them into fields with BoundaryVote from [ftw-fbp](https://pypi.org/project/ftw-fbp/), using `fbp.FTW_2E`, the setting of the FTW 2nd Edition. The polygons are GeoParquet in EPSG:4326 with the same columns as the 2nd Edition.
 
 ## TUI
 
