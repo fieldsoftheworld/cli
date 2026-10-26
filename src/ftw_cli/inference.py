@@ -5,7 +5,6 @@ import math
 from importlib.metadata import version
 from pathlib import Path
 
-import duckdb
 import numpy as np
 import pyarrow as pa
 import rasterio
@@ -50,10 +49,6 @@ def predict(
 ) -> dict:
     """Write field and boundary probabilities (uint8, p * 255) for ``input`` to a COG."""
     spec = models.MODELS[model]
-    if spec.imagery != "scenes":
-        raise ValueError(
-            f"{model} runs on quarterly mosaics; use `ftw detect --model {model}`"
-        )
     session = open_session(model)
     input_name = session.get_inputs()[0].name
 
@@ -120,11 +115,11 @@ def polygonize(
     crs: str = "4326",
     area: BBox | None = None,
 ) -> dict:
-    """Split ``predict``'s probabilities into fields with ``fbp.FTW_2E`` and write them to ``out``.
+    """Split ``predict``'s probabilities into fields with ``fbp.FTW_2E`` and write them.
 
-    ``simplify`` is a tolerance in meters; ``min_area`` and ``max_area`` are in m².
-    ``crs`` is an EPSG code, or ``utm`` for the raster's own CRS. With an ``area`` that has a
-    polygon, only fields that intersect it are kept.
+    ``simplify`` is in meters, ``min_area`` and ``max_area`` in m². ``crs`` is an EPSG
+    code, or ``utm`` for the raster's own. With an ``area`` polygon, only fields that
+    intersect it are kept. A field whose pixels form several pieces keeps the largest.
     """
     vectors.check(out)
     with rasterio.open(input) as src:
@@ -142,26 +137,45 @@ def polygonize(
         tags = src.tags()
         transform = src.transform
     target = vectors.crs(crs, utm=native)
+
+    field, boundary = scores.astype(np.float32) / 255
+    prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
+    del field, boundary
+    instances = run_windowed(
+        FTW_2E,
+        prob.argmax(0).astype(np.uint8),
+        prob,
+        pixel_area_m2=abs(transform.a * transform.e),
+    )
+    del prob
+    pieces = list(shapes(instances, mask=instances > 0, transform=transform))
     con = vectors.connect()
+    con.execute(
+        "create table shapes as select unnest(?::varchar[]) as g, unnest(?::bigint[]) as label",
+        [[json.dumps(g) for g, _ in pieces], [int(v) for _, v in pieces]],
+    )
+    con.register("probs", _mean_probs(instances, scores))
     inside = "true"
     if area and area.shape:
         inside = f"ST_Intersects(ST_Transform(geom, '{native}', 'EPSG:4326'), {area.envelope()})"
-    split_into(
-        con,
-        scores,
-        transform,
-        native,
-        target,
-        input.stem,
-        simplify,
-        min_area,
-        max_area,
-        inside,
-    )
+    query = f"""
+        select concat({vectors.quote(input.stem + "-")}, row_number() over ()) as id,
+               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}')
+                   as geometry,
+               area::float as "metrics:area", ST_Perimeter(geom)::float as "metrics:perimeter",
+               least(100, greatest(0, round(field_prob * 100)))::utinyint as score,
+               field_prob::float as field_prob, boundary_prob::float as boundary_prob
+        from (
+            select geom, ST_Area(geom) as area, label
+            from (select ST_GeomFromGeoJSON(g) as geom, label from shapes)
+            qualify row_number() over (partition by label order by area desc) = 1
+        ) join probs using (label)
+        where {Filters(min_area, max_area).sql(area="area")} and {inside}
+    """
     meta = collection(tags.get("FTW_MODEL", "an FTW model"), "Sentinel-2")
     if when := _iso(tags.get("TIFFTAG_DATETIME")):
         meta["determination:datetime"] = when
-    count = vectors.write(con, "select * from fields", out, meta, crs=target)
+    count = vectors.write(con, query, out, meta, crs=target)
     return {"path": str(out), "fields": count, "crs": target}
 
 
@@ -175,63 +189,6 @@ def open_session(model: models.ModelName):
         if p in ort.get_available_providers()
     ]
     return ort.InferenceSession(str(models.fetch(model)), providers=providers)
-
-
-def split_into(
-    con: duckdb.DuckDBPyConnection,
-    scores: np.ndarray,
-    transform,
-    native: str,
-    target: str,
-    prefix: str,
-    simplify: float = 15.0,
-    min_area: float | None = 500.0,
-    max_area: float | None = None,
-    keep: str = "true",
-) -> None:
-    """Split uint8 field and boundary ``scores`` with ``fbp.FTW_2E`` into table ``fields``.
-
-    ``keep`` is an SQL predicate over ``geom`` in the ``native`` CRS; ids are ``prefix-n``.
-    A field whose pixels form several pieces keeps the largest, so each is one Polygon.
-    """
-    field, boundary = scores.astype(np.float32) / 255
-    prob = np.stack([np.clip(1 - field - boundary, 0, 1), field, boundary])
-    del field, boundary
-    instances = run_windowed(
-        FTW_2E,
-        prob.argmax(0).astype(np.uint8),
-        prob,
-        pixel_area_m2=abs(transform.a * transform.e),
-    )
-    del prob
-    pieces = list(shapes(instances, mask=instances > 0, transform=transform))
-    con.execute(
-        "create or replace temp table shapes as "
-        "select unnest(?::varchar[]) as g, unnest(?::bigint[]) as label",
-        [[json.dumps(g) for g, _ in pieces], [int(v) for _, v in pieces]],
-    )
-    del pieces
-    con.register("probs", _mean_probs(instances, scores))
-    con.execute(
-        'create table if not exists fields (id varchar, geometry geometry, "metrics:area" float, '
-        '"metrics:perimeter" float, score utinyint, field_prob float, boundary_prob float)'
-    )
-    con.execute(
-        f"""
-        insert into fields
-        select concat({vectors.quote(prefix + "-")}, row_number() over ()),
-               ST_Transform(ST_SimplifyPreserveTopology(geom, {float(simplify)}), '{native}', '{target}'),
-               area::float, ST_Perimeter(geom)::float,
-               least(100, greatest(0, round(field_prob * 100)))::utinyint,
-               field_prob::float, boundary_prob::float
-        from (
-            select geom, ST_Area(geom) as area, label
-            from (select ST_GeomFromGeoJSON(g) as geom, label from shapes)
-            qualify row_number() over (partition by label order by area desc) = 1
-        ) join probs using (label)
-        where {Filters(min_area, max_area).sql(area="area")} and {keep}
-        """
-    )
 
 
 def _mean_probs(
