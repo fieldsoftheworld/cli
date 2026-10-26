@@ -37,7 +37,14 @@ optional-dependencies.inference = [
 scripts.ftw = "ftw_cli.cli:run"
 
 [dependency-groups]
-dev = [ "pre-commit>=4", "pytest>=9", "pytest-cov>=7", "ruff>=0.17", "ty>=0.0.92" ]
+dev = [
+  "pre-commit>=4",
+  "pytest>=9",
+  "pytest-cov>=7",
+  "pytest-xdist>=3.6",
+  "ruff>=0.17",
+  "ty>=0.0.92",
+]
 
 [tool.uv]
 sources.ftw-cli = { workspace = true }
@@ -47,6 +54,6 @@ fix = true
 lint.extend-select = [ "B", "I", "UP" ]
 
 [tool.pytest]
-ini_options.addopts = '-m "not integration"'
+ini_options.addopts = '-m "not integration" -n auto --maxprocesses 4'
 ini_options.markers = [ "integration: needs network access to Source Coop" ]
 ini_options.testpaths = [ "tests" ]
