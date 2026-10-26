@@ -42,5 +42,6 @@ def write(
                 predictor=2,
                 blocksize=512,
                 overview_resampling="average",
+                statistics="YES",  # min/max/mean/stddev inside the file, as Portolan requires
                 bigtiff="IF_SAFER",
             )
