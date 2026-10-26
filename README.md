@@ -29,6 +29,8 @@ ftw view "Chartres, France" --out chartres.png       # a map of the fields
 
 `--out` writes `.parquet`, `.geojson`, `.gpkg`, or `.fgb`. Parquet output is [fiboa](https://fiboa.org) GeoParquet, as the 2nd Edition publishes it, sorted along a Hilbert curve with a bbox column so other readers can filter it by area. Queries read only the parts of the 2nd Edition that overlap the area, so a county in Iowa takes about 8 seconds. An export of several years is one file with a `year` column; in Parquet, each row's `collection` names its year's 2nd Edition collection.
 
+`ftw data diff "Ames, Iowa" --from 2018 --to 2024` matches the two years' fields and labels each as kept, changed, split, merged, new, or lost, with counts and area for both years; `--out` writes the later year's fields and the lost ones with `year` and `change`. In Ames, 372 of 2018's 598 fields are kept in 2024, 100 merged into 14 larger ones, and 80 were lost while 70 are new.
+
 `--min-area` and `--max-area` (m²) keep fields in a size range, and `--min-score` keeps fields the model scored at least that high (0 to 100). They work on `data query` and `view`, and the area bounds also work on `detect` and `polygonize`, which drop fields under 500 m² unless told otherwise:
 
 

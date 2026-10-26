@@ -82,3 +82,44 @@ def test_write_prediction_adds_the_match(con, tmp_path):
         "match_iou"
     ] == pytest.approx(1.0)
     assert rows["f6"]["matched_id"] is None and rows["f6"]["match_iou"] is None
+
+
+@pytest.mark.integration
+def test_changes_add_up_to_each_years_fields():
+    con = ftw2e.connect()
+    box = ftw2e.BBox(-93.70, 41.95, -93.60, 42.05)
+    match.load(con, "a", *ftw2e.select(con, box, 2018))
+    match.load(con, "b", *ftw2e.select(con, box, 2024))
+    match.project(con, "a", "b")
+    rows = match.changes(con)
+    assert sum(r.fields_from for r in rows) == ftw2e.summarize(con, box, 2018)["fields"]
+    assert sum(r.fields_to for r in rows) == ftw2e.summarize(con, box, 2024)["fields"]
+
+
+def test_changes_label_every_field_of_both_years(tmp_path):
+    con = ftw2e.connect()
+    match.load(con, "a", boxes([*REFERENCE, (3000, 3100)]))  # the last overlaps nothing
+    match.load(con, "b", boxes(PREDICTION))
+    match.project(con, "a", "b")
+    rows = {c.change: c for c in match.changes(con, iou=0.5)}
+    counts = {name: (c.fields_from, c.fields_to) for name, c in rows.items()}
+    assert counts == {
+        "kept": (1, 1),
+        "changed": (1, 1),
+        "split": (1, 2),
+        "merged": (2, 1),
+        "new": (0, 1),
+        "lost": (1, 0),
+    }
+    assert (rows["split"].area_from_ha, rows["split"].area_to_ha) == (3.5, 3.0)
+    assert (rows["merged"].area_from_ha, rows["merged"].area_to_ha) == (2.0, 2.2)
+
+    out = tmp_path / "changes.parquet"
+    assert (
+        match.write_changes(con, out, 2018, 2024) == 7
+    )  # all of 2024, and 2018's lost
+    table = pq.read_table(out).to_pylist()
+    assert {(r["year"], r["change"]) for r in table if r["id"] == "f6"} == {
+        (2024, "new"),
+        (2018, "lost"),
+    }

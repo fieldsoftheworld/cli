@@ -325,6 +325,15 @@ def _literal(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def select(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> tuple[str, list]:
+    """SQL for the fields in ``bbox`` in ``year``, and its parameters."""
+    files = hrefs(con, bbox, year)
+    if not files:
+        raise LookupError(f"no FTW {year} fields intersect {bbox}")
+    query = f"select * exclude (bbox, zone) from read_parquet(?) where {_in_bbox(bbox)}"
+    return query, [files]
+
+
 def _in_bbox(bbox: BBox) -> str:
     # The bbox struct lets Parquet skip row groups; ST_Intersects drops bbox-only hits.
     return f"{bbox.overlaps('bbox.')} and ST_Intersects(geometry, {bbox.envelope()})"
