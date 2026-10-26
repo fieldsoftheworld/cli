@@ -57,10 +57,17 @@ Every command prints JSON when its output is piped, or with `--json`, and tables
 ```sh
 ftw data query "Chartres, France" --year 2023 | jq .fields
 ftw schema detect                       # every parameter of a command as JSON Schema
-ftw skill --out ~/.claude/skills        # install the agent skill (or print it with `ftw skill`)
 ```
 
-The skill tells an agent which command answers which question, when to use the precomputed data instead of running a model, and which output format to pick.
+The `ftw` agent skill tells an agent which command answers which question, when to use the precomputed data instead of running a model, and which output format to pick. Install it whichever way suits your agent:
+
+```sh
+npx skills add fieldsoftheworld/cli                          # Claude Code, Cursor, Codex, and other agents
+/plugin install ftw --marketplace fieldsoftheworld/cli       # inside Claude Code, as a plugin
+ftw skill --out ~/.claude/skills                             # from an installed ftw
+```
+
+The skill is [`skills/ftw/SKILL.md`](skills/ftw/SKILL.md); while the repository is private, the first two need GitHub access to it.
 
 ## Troubleshooting
 

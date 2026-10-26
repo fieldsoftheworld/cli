@@ -178,7 +178,10 @@ def skill(
     ] = None,
 ):
     """The agent skill that teaches ftw: printed, or installed into a skills directory."""
-    text = (Path(__file__).parent / "SKILL.md").read_text()
+    packaged = Path(__file__).parent / "SKILL.md"
+    # Editable installs don't copy it into the package; read it from the repo instead.
+    source = Path(__file__).parents[2] / "skills" / "ftw" / "SKILL.md"
+    text = (packaged if packaged.exists() else source).read_text()
     if out is None:
         sys.stdout.write(text)
         return
