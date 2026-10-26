@@ -10,8 +10,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ftw_cli import __version__, ftw2e, output
-from ftw_cli.cli_args import AreaArg, CrsArg, YearArg, YearsArg, parse_area
+from ftw_cli.cli_args import (
+    AreaArg,
+    CrsArg,
+    MaxArea,
+    MinArea,
+    MinScore,
+    YearArg,
+    YearsArg,
+    parse_area,
+)
 from ftw_cli.cli_detect import detect, imagery, models, polygonize, predict
+from ftw_cli.filters import Filters
 from ftw_cli.progress import bar, spinner
 
 app = App(
@@ -92,18 +102,22 @@ def query(
         int | None, Parameter(help="Write at most this many fields.")
     ] = None,
     crs: CrsArg = "4326",
+    min_area: MinArea = None,
+    max_area: MaxArea = None,
+    min_score: MinScore = None,
 ):
     """Summarize the fields in AREA per year, or write them to a file with --out."""
     box = parse_area(area)
+    filters = Filters(min_area, max_area, min_score)
     con = ftw2e.connect()
     years = ftw2e.parse_years(year, ftw2e.years(con))
     label = f"{years[0]}" if len(years) == 1 else f"{years[0]}-{years[-1]}"
     if out:
         with spinner(f"Writing FTW {label} fields to {out}"):
-            output.emit(ftw2e.export(con, box, years, out, limit, crs))
+            output.emit(ftw2e.export(con, box, years, out, limit, crs, filters))
         return
     with bar(f"Reading FTW {label} fields") as progress:
-        rows = ftw2e.summaries(box, years, progress)
+        rows = ftw2e.summaries(box, years, progress, filters)
     if len(rows) == 1:
         output.emit(rows[0], title=f"FTW {label} fields")
         return
@@ -121,6 +135,9 @@ def view(
     limit: Annotated[
         int, Parameter(help="Draw at most this many fields, largest first.")
     ] = 50_000,
+    min_area: MinArea = None,
+    max_area: MaxArea = None,
+    min_score: MinScore = None,
 ):
     """Draw the fields in AREA to a PNG, colored by model score."""
     from ftw_cli import render
@@ -129,7 +146,9 @@ def view(
     con = ftw2e.connect()
     year = year or ftw2e.years(con)[-1]
     with spinner(f"Drawing FTW {year} fields"):
-        fields = ftw2e.fields(con, box, year, limit)
+        fields = ftw2e.fields(
+            con, box, year, limit, Filters(min_area, max_area, min_score)
+        )
         render.render(fields, box, width).save(out)
     output.emit({"path": str(out), "fields": len(fields), "year": year})
 

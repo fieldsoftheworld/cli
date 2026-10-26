@@ -45,7 +45,7 @@ def test_polygonize_measures_meters_and_writes_wgs84(tmp_path):
     path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
 
     result = detect.polygonize(
-        path, tmp_path / "fields.parquet", simplify=0, min_size=0
+        path, tmp_path / "fields.parquet", simplify=0, min_area=0
     )
 
     assert result["fields"] == 1
@@ -61,6 +61,22 @@ def test_polygonize_measures_meters_and_writes_wgs84(tmp_path):
     assert collection["determination:method"] == "auto-imagery"
 
 
+def test_polygonize_filters_fields_by_area(tmp_path):
+    field = np.zeros((40, 60), dtype=np.uint8)
+    field[5:25, 5:25] = 230  # 20 x 20 px at 10 m = 40,000 m²
+    field[30:35, 40:45] = 230  # 5 x 5 px = 2,500 m²
+    path = _scores(tmp_path / "scores.tif", field, np.zeros_like(field))
+
+    def count(**filters) -> int:
+        out = tmp_path / "fields.parquet"
+        return detect.polygonize(path, out, simplify=0, **filters)["fields"]
+
+    assert count() == 2
+    assert count(min_area=10_000) == 1
+    assert count(max_area=10_000) == 1
+    assert count(min_area=50_000) == 0
+
+
 def test_polygonize_splits_touching_fields_at_the_boundary(tmp_path):
     # Two fields share an edge; a one-pixel predicted boundary between them keeps them apart.
     field = np.zeros((40, 60), dtype=np.uint8)
@@ -71,7 +87,7 @@ def test_polygonize_splits_touching_fields_at_the_boundary(tmp_path):
     path = _scores(tmp_path / "scores.tif", field, boundary)
 
     result = detect.polygonize(
-        path, tmp_path / "fields.parquet", simplify=0, min_size=0
+        path, tmp_path / "fields.parquet", simplify=0, min_area=0
     )
 
     assert result["fields"] == 2
@@ -120,7 +136,7 @@ def test_polygonize_writes_gdal_formats_in_wgs84(tmp_path, suffix):
     out = tmp_path / f"fields{suffix}"
     out.write_text("stale")  # an existing file is replaced, not appended to
 
-    assert detect.polygonize(path, out, simplify=0, min_size=0)["fields"] == 1
+    assert detect.polygonize(path, out, simplify=0, min_area=0)["fields"] == 1
 
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial")

@@ -31,6 +31,7 @@ AREA is a quoted place name (`"Story County, Iowa"`), `xmin,ymin,xmax,ymax` in d
 - `--out` picks the format from the suffix. `.parquet` is fiboa GeoParquet and the only format that keeps the collection metadata (model, method, date). Use `.gpkg` for desktop GIS and `.geojson` for small web maps.
 - Output is EPSG:4326 unless you pass `--crs` with an EPSG code (`3857`) or `utm`. `utm` is the zone at the area's center for `data query` and the imagery's own zone for `detect`. `metrics:area` is always in m² and `metrics:perimeter` in m.
 - Areas over 10,000 km² read several GB. Narrow the area first when you can.
+- `--min-area` and `--max-area` (m²) and `--min-score` (0 to 100) filter fields before counting or writing, on `data query` and `view`; `detect` takes the area bounds and drops fields under 500 m² by default.
 - A failure prints one `error:` line on stderr and exits 1. A missing extra says which `pip install` fixes it.
 - `score` (0 to 100) in the 2nd Edition is the model's confidence in a field.
 
