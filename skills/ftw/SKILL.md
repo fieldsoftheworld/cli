@@ -22,6 +22,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | How the fields changed over the years | `ftw data query AREA --year all` |
 | Fields in imagery from any year, including ones the 2nd Edition lacks | `ftw detect AREA --year Y --out fields.gpkg` |
 | A picture of the fields | `ftw view AREA --out map.png` |
+| How well one set of fields reproduces another (precision, recall, IoU) | `ftw compare REFERENCE PREDICTION` |
 | Whether the install and network work | `ftw doctor` |
 | Every parameter of a command as JSON Schema | `ftw schema [COMMAND]` |
 

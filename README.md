@@ -60,6 +60,14 @@ ftw polygonize scores.tif --out fields.parquet
 
 `ftw models list` shows the models. They download once to `~/.cache/ftw-cli` (or `$FTW_CACHE_DIR`). The imagery and the field and boundary probabilities are Cloud Optimized GeoTIFFs. CI checks sample outputs with `fiboa validate` and `rio cogeo validate`, so they open in QGIS, lonboard, GDAL, and the fiboa tools.
 
+## Compare field sets
+
+```sh
+ftw compare reference.parquet detected.gpkg --out matches.parquet
+```
+
+`ftw compare` matches each field in the second file to at most one field in the first by intersection over union (IoU at least 0.5 by default, `--iou` to change it), measured in the UTM zone of the reference. It reports precision, recall, F1, the mean IoU of the matches, the share of reference area that is matched, and how many predicted fields merge several reference fields or split one. The files can be in any of the formats above and any CRS. `--out` writes the second file's fields with `match_iou` and `matched_id`. Detecting Ames, Iowa for 2024 with ftw-q and comparing it with the 2nd Edition for the same year matches 467 of its 578 fields (precision 0.81, recall 0.81, mean IoU 0.86).
+
 ## For scripts and agents
 
 Every command prints JSON when its output is piped, or with `--json`, and tables in a terminal. Progress goes to stderr and only in a terminal. Errors go to stderr with a non-zero exit, and nothing prompts.
