@@ -5,6 +5,8 @@ layout, using rasterio warped reads in place of odc-stac, dask, and xarray.
 """
 
 import math
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -100,8 +102,17 @@ def search(
     return min(usable, key=lambda s: s.cloud_cover)
 
 
-def download(scenes: list[Scene], bbox: BBox, out: Path, host: str = "mspc") -> dict:
-    """Stack the RGBN bands of ``scenes`` over ``bbox`` into one uint16 GeoTIFF at 10 m."""
+def download(
+    scenes: list[Scene],
+    bbox: BBox,
+    out: Path,
+    host: str = "mspc",
+    progress: Callable[[int, int | None], None] | None = None,
+) -> dict:
+    """Stack the RGBN bands of ``scenes`` over ``bbox`` into one uint16 GeoTIFF at 10 m.
+
+    The bands are read at once on threads, since each is a separate remote COG.
+    """
     import pystac
 
     items = [pystac.Item.from_file(s.href) for s in scenes]
@@ -125,26 +136,34 @@ def download(scenes: list[Scene], bbox: BBox, out: Path, host: str = "mspc") -> 
     )
     transform = from_origin(left, bottom + height * RESOLUTION, RESOLUTION, RESOLUTION)
 
-    stack = []
-    for item in items:
-        for band in BANDS[host]:
-            with (
-                rasterio.open(item.assets[band].href) as src,
-                WarpedVRT(
-                    src,
-                    crs=crs,
-                    transform=transform,
-                    width=width,
-                    height=height,
-                    resampling=Resampling.bilinear,
-                ) as vrt,
-            ):
-                stack.append(vrt.read(1))
+    def read(href: str) -> np.ndarray:
+        with (
+            rasterio.open(href) as src,
+            WarpedVRT(
+                src,
+                crs=crs,
+                transform=transform,
+                width=width,
+                height=height,
+                resampling=Resampling.bilinear,
+            ) as vrt,
+        ):
+            return vrt.read(1)
+
+    hrefs = [item.assets[band].href for item in items for band in BANDS[host]]
+    with ThreadPoolExecutor(max_workers=len(hrefs)) as pool:
+        futures = [pool.submit(read, h) for h in hrefs]
+        for done, _ in enumerate(as_completed(futures), 1):
+            if progress:
+                progress(done, len(hrefs))
+        stack = [f.result() for f in futures]
+    for i, item in enumerate(items):
         if _baseline(item) >= 4:
             # Baseline 4.0 added a +1000 offset; the models were trained on baseline 3.
-            stack[-4:] = [
+            n = len(BANDS[host])
+            stack[i * n : (i + 1) * n] = [
                 (b.astype(np.int32) - 1000).clip(min=0).astype(np.uint16)
-                for b in stack[-4:]
+                for b in stack[i * n : (i + 1) * n]
             ]
 
     latest = max(i.datetime for i in items)

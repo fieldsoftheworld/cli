@@ -1,6 +1,9 @@
 """FTW Global Data 2nd Edition on Source Coop, queried in place with DuckDB."""
 
 import json
+import math
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +48,15 @@ class BBox:
             f"and {p}ymax >= {self.ymin} and {p}ymin <= {self.ymax}"
         )
 
+    def area_km2(self) -> float:
+        lat = math.radians((self.ymin + self.ymax) / 2)
+        return (
+            (self.xmax - self.xmin)
+            * (self.ymax - self.ymin)
+            * 111.32**2
+            * math.cos(lat)
+        )
+
     def envelope(self) -> str:
         return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
 
@@ -70,6 +82,28 @@ def info(con: duckdb.DuckDBPyConnection) -> list[dict]:
         """
     )
     return _records(rows)
+
+
+def years(con: duckdb.DuckDBPyConnection) -> list[int]:
+    return [
+        y
+        for (y,) in con.execute(
+            f"select distinct year from '{VECTOR_INDEX}' order by year"
+        ).fetchall()
+    ]
+
+
+def history(
+    bbox: BBox, progress: Callable[[int, int | None], None] | None = None
+) -> list[dict]:
+    """``summarize`` for every year, each on its own connection so the years run at once."""
+    every = years(connect())
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(summarize, connect(), bbox, year) for year in every]
+        for done, _ in enumerate(as_completed(futures), 1):
+            if progress:
+                progress(done, len(every))
+    return [f.result() for f in futures]
 
 
 def latest_year(con: duckdb.DuckDBPyConnection) -> int:

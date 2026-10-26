@@ -4,6 +4,7 @@ import hashlib
 import os
 import tempfile
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,12 +53,18 @@ def cache_dir() -> Path:
     )
 
 
-def fetch(name: str) -> Path:
+def cached(name: str) -> Path | None:
+    """The local copy of model ``name``, if it has been downloaded."""
+    path = cache_dir() / MODELS[name].url.rsplit("/", 1)[-1]
+    return path if path.exists() else None
+
+
+def fetch(name: str, progress: Callable[[int, int | None], None] | None = None) -> Path:
     """Local path to model ``name``, downloading and verifying it on first use."""
+    if path := cached(name):
+        return path
     model = MODELS[name]
     path = cache_dir() / model.url.rsplit("/", 1)[-1]
-    if path.exists():
-        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     # Download to a temp file and rename, so a concurrent reader never sees a partial file.
     with tempfile.NamedTemporaryFile(
@@ -65,9 +72,14 @@ def fetch(name: str) -> Path:
     ) as tmp:
         digest = hashlib.sha256()
         with urllib.request.urlopen(model.url) as response:
+            total = int(response.headers.get("Content-Length") or 0) or None
+            done = 0
             while chunk := response.read(1 << 20):
                 digest.update(chunk)
                 tmp.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
     if digest.hexdigest() != model.sha256:
         os.remove(tmp.name)
         raise OSError(f"{name}: downloaded file does not match its sha256")
