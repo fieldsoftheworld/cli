@@ -14,6 +14,7 @@ from rasterio.features import shapes
 from rasterio.windows import Window
 
 from ftw_cli import __version__, cog, fiboa, models, vectors
+from ftw_cli.ftw2e import BBox
 
 # Score bands: field and boundary probability as uint8 (p * 255), like the 2nd Edition rasters.
 BANDS = ("field", "boundary")
@@ -97,11 +98,13 @@ def polygonize(
     min_size: float = 500.0,
     max_size: float | None = None,
     crs: str = "4326",
+    area: BBox | None = None,
 ) -> dict:
     """Split ``predict``'s probabilities into fields with ``fbp.FTW_2E`` and write them to ``out``.
 
     ``simplify`` is a tolerance in meters; ``min_size`` and ``max_size`` are areas in m².
-    ``crs`` is an EPSG code, or ``utm`` for the raster's own CRS.
+    ``crs`` is an EPSG code, or ``utm`` for the raster's own CRS. With an ``area`` that has a
+    polygon, only fields that intersect it are kept.
     """
     vectors.check(out)
     with rasterio.open(input) as src:
@@ -121,8 +124,20 @@ def polygonize(
     target = vectors.crs(crs, utm=native)
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = true;")
+    inside = "true"
+    if area and area.shape:
+        inside = f"ST_Intersects(ST_Transform(geom, '{native}', 'EPSG:4326'), {area.envelope()})"
     split_into(
-        con, scores, transform, native, target, input.stem, simplify, min_size, max_size
+        con,
+        scores,
+        transform,
+        native,
+        target,
+        input.stem,
+        simplify,
+        min_size,
+        max_size,
+        keep=inside,
     )
     meta = collection(tags.get("FTW_MODEL", "an FTW model"), "Sentinel-2")
     if when := _iso(tags.get("TIFFTAG_DATETIME")):

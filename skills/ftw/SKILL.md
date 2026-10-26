@@ -23,7 +23,7 @@ description: Agricultural field boundaries for any place on Earth with the ftw C
 | Whether the install and network work | `ftw doctor` |
 | Every parameter of a command as JSON Schema | `ftw schema [COMMAND]` |
 
-AREA is a quoted place name (`"Story County, Iowa"`) or `xmin,ymin,xmax,ymax` in degrees. A place name means that place's own bounding box, so a city is its urban extent; for the farmland around a town, use its county or a bbox. Check the place and bbox printed on stderr, since a vague name can geocode to the wrong place.
+AREA is a quoted place name (`"Story County, Iowa"`), `xmin,ymin,xmax,ymax` in degrees, or a polygon file (`.geojson`, `.gpkg`, `.parquet`, `.fgb`, `.shp`) whose polygons are merged into one area. A place name means that place's own bounding box, so a city is its urban extent; for the farmland around a town, use its county or a bbox. Check the place and bbox printed on stderr, since a vague name can geocode to the wrong place.
 
 ## Rules
 

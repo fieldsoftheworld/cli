@@ -86,7 +86,7 @@ def detect(
             box, year, work / "imagery.tif", host, buffer_days, cloud_cover_max
         )
         _predict(work / "imagery.tif", work / "scores.tif", model, None, 4)
-        fields = _polygonize(work / "scores.tif", out, 15, 500, None, crs)
+        fields = _polygonize(work / "scores.tif", out, 15, 500, None, crs, box)
     kept = {"rasters": str(keep)} if keep else {}
     output.emit({**fields, "model": model, "scenes": scenes["scenes"], **kept})
 
@@ -272,9 +272,10 @@ def _polygonize(
     min_size: float,
     max_size: float | None,
     crs: str,
+    area: BBox | None = None,
 ) -> dict:
     require("inference")
     from ftw_cli import detect as onnx
 
     with spinner("Splitting fields with BoundaryVote"):
-        return onnx.polygonize(input, out, simplify, min_size, max_size, crs)
+        return onnx.polygonize(input, out, simplify, min_size, max_size, crs, area)

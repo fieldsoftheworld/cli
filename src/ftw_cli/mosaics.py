@@ -108,7 +108,7 @@ def tiles(con: duckdb.DuckDBPyConnection, bbox: BBox, year: int) -> list[Tile]:
 def locate(tile: Tile, year: int, bbox: BBox) -> Part | None:
     """The part of ``tile`` over ``bbox`` plus the halo, or None if they don't overlap."""
     full, height, width, crs = tile.transform, tile.height, tile.width, tile.crs
-    box = from_bounds(*transform_bounds("EPSG:4326", crs, *vars(bbox).values()), full)
+    box = from_bounds(*transform_bounds("EPSG:4326", crs, *bbox.bounds), full)
     r0, c0 = max(int(box.row_off) - HALO, 0), max(int(box.col_off) - HALO, 0)
     r1 = min(int(box.row_off + box.height) + 1 + HALO, height)
     c1 = min(int(box.col_off + box.width) + 1 + HALO, width)

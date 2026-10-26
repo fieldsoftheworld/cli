@@ -17,7 +17,7 @@ The base install queries, exports, and draws the 2nd Edition. The `imagery` extr
 
 ## Use
 
-An area is a place name or `xmin,ymin,xmax,ymax` in degrees. Place names go through OpenStreetMap's geocoder and are cached.
+An area is a place name, `xmin,ymin,xmax,ymax` in degrees, or a polygon file (`.geojson`, `.gpkg`, `.parquet`, `.fgb`, or `.shp`). Place names go through OpenStreetMap's geocoder and are cached. A file's polygons are merged into one area, so a county, a watershed, or a farm outline counts only the fields that touch it.
 
 ```sh
 ftw data query "Story County, Iowa"                  # field count, area, mean score

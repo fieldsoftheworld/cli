@@ -4,7 +4,7 @@ import json
 import math
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import duckdb
@@ -23,6 +23,8 @@ class BBox:
     ymin: float
     xmax: float
     ymax: float
+    # The area's polygon (WKT, EPSG:4326) when it is not the whole box, as from a file.
+    shape: str | None = field(default=None, repr=False)
 
     @classmethod
     def parse(cls, text: str) -> "BBox":
@@ -30,7 +32,8 @@ class BBox:
         parts = text.split(",")
         if len(parts) != 4:
             raise ValueError(f"bbox needs 4 comma-separated numbers, got {text!r}")
-        box = cls(*(float(p) for p in parts))
+        xmin, ymin, xmax, ymax = (float(p) for p in parts)
+        box = cls(xmin, ymin, xmax, ymax)
         if not (
             -180 <= box.xmin < box.xmax <= 180 and -90 <= box.ymin < box.ymax <= 90
         ):
@@ -39,8 +42,12 @@ class BBox:
             )
         return box
 
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        return self.xmin, self.ymin, self.xmax, self.ymax
+
     def __str__(self) -> str:
-        return ",".join(f"{v:g}" for v in vars(self).values())
+        return ",".join(f"{v:g}" for v in self.bounds)
 
     def overlaps(self, prefix: str = "") -> str:
         """SQL predicate for rows whose ``{prefix}xmin..ymax`` bounds intersect this box."""
@@ -51,6 +58,9 @@ class BBox:
         )
 
     def envelope(self) -> str:
+        """SQL for the area: its polygon when it has one, else the box."""
+        if self.shape:
+            return f"ST_GeomFromText('{self.shape}')"
         return f"ST_MakeEnvelope({self.xmin}, {self.ymin}, {self.xmax}, {self.ymax})"
 
     def area_km2(self) -> float:
